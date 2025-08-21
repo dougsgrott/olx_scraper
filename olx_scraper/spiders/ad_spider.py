@@ -35,12 +35,12 @@ class AdSpider(Spider):
         'DOWNLOAD_DELAY': 3,
         'ROBOTSTXT_OBEY': False,
         'ITEM_PIPELINES': {
-            # 'olx_scraper.pipelines.UpdateCatalogDatabasePipeline': 200,
             'olx_scraper.pipelines.DefaultValuesAdPipeline': 110,
             'olx_scraper.pipelines.SaveAdInfoPipeline': 200,
             'olx_scraper.pipelines.SaveAdCharacteristicsPipeline': 210,
             'olx_scraper.pipelines.SaveAdDetailsPipeline': 220,
             'olx_scraper.pipelines.SaveAdPricingPipeline': 220,
+            'olx_scraper.pipelines.UpdateCatalogDatabasePipeline': 300,
         },
         'LOG_LEVEL': 'INFO',
         'LOG_FILE': 'logs/olx_ad.log',

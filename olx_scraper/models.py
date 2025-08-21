@@ -37,6 +37,7 @@ class CatalogInfoModel(Base):
     url = Column(String(200))
     url_is_scraped = Column(Integer)
     url_scraped_date = Column(DateTime)
+    uploaded_to_cloud = Column(Integer)
 
 
 class CatalogDetailsModel(Base):
@@ -74,6 +75,7 @@ class AdInfoModel(Base):
     title = Column(String(60))
     url = Column(String(200))
     scraped_date = Column(DateTime)
+    uploaded_to_cloud = Column(Integer)
 
 
 class AdCharacteristicsModel(Base):

@@ -306,6 +306,7 @@ class CatalogItem(scrapy.Item):
     location = scrapy.Field(input_processor=process_location)
     code = scrapy.Field(input_processor=process_code)
     scraped_date = scrapy.Field()
+    uploaded_to_cloud = scrapy.Field()
     url = scrapy.Field()
     url_is_scraped = scrapy.Field()
     url_scraped_date = scrapy.Field()
@@ -450,6 +451,7 @@ class AdItem(scrapy.Item):
     breadcrumb = scrapy.Field(input_processor=process_breadcrumb, output_processor=TakeFirst())
     code = scrapy.Field(input_processor=process_code, output_processor=TakeFirst())
 
+    uploaded_to_cloud = scrapy.Field()
     scraped_date = scrapy.Field()
     url = scrapy.Field(output_processor=TakeFirst())
 

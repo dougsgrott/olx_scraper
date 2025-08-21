@@ -86,7 +86,7 @@ class SaveCatalogInfoPipeline(BaseSavePipeline):
         session = self.factory()
         entry = CatalogInfoModel()
         fields = ["uid", "title", "location", "date", "code",
-                  "scraped_date", "url", "url_is_scraped", "url_scraped_date"]
+                  "scraped_date", "url", "url_is_scraped", "url_scraped_date", "uploaded_to_cloud"]
         for k in fields:
             setattr(entry, k, item[k])
         self.process_entry(entry, session)
@@ -137,7 +137,7 @@ class SaveAdInfoPipeline(BaseSavePipeline):
         session = self.factory()
         entry = AdInfoModel()
         fields = ['date', 'breadcrumb', 'code', 'description', 'full_location', 'street_address', 'title',
-                  "scraped_date", "url"]
+                  "scraped_date", "url", "uploaded_to_cloud"]
         for k in fields:
             setattr(entry, k, item[k])
         self.process_entry(entry, session)
@@ -194,7 +194,7 @@ class UpdateCatalogDatabasePipeline(object):
         # catalog = ImoveisSCCatalog()
         # catalog.title = item["title"]
 
-        scraped_row = session.query(CatalogInfoModel).filter_by(url=item["url"]).first()
+        scraped_row = session.query(CatalogInfoModel).filter_by(code=item["code"]).first() # url=item["url"]
         scraped_row.url_is_scraped = 1
         scraped_row.url_scraped_date = datetime.now()
 
@@ -213,6 +213,7 @@ class DefaultValuesCatalogPipeline(object):
         item.setdefault('pricing', {})
         item.setdefault('scraped_date', datetime.now())
         item.setdefault('title', '')
+        item.setdefault('uploaded_to_cloud', 0)
         item.setdefault('url_is_scraped', 0)
         item.setdefault('url_scraped_date', None)
         return item
@@ -232,4 +233,5 @@ class DefaultValuesAdPipeline(object):
         item.setdefault('scraped_date', datetime.now())
         item.setdefault('street_address', '')
         item.setdefault('title', '')
+        item.setdefault('uploaded_to_cloud', 0)
         return item
