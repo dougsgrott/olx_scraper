@@ -1,0 +1,25 @@
+# Configuration for the OLX scraper run script
+
+# Set the mode for the scraper.
+# Options: 'CATALOG' or 'AD'
+mode: 'CATALOG'
+
+# Settings for the Catalog Spider
+catalog_spider:
+  # A list of URLs to start scraping from.
+  # The spider will process each URL and its subsequent pages.
+  start_urls:
+    - "https://www.olx.com.br/imoveis/aluguel/estado-sc/florianopolis-e-regiao"
+
+# Settings for the Ad Spider
+ad_spider:
+  # Defines where the spider gets its URLs.
+  # Options:
+  #   'database': Fetches unscraped ad URLs from the database (default operation).
+  #   'urls': Scrapes only the specific URLs provided in the start_urls list below.
+  source: 'database'
+
+  # A list of specific ad URLs to scrape.
+  # This is only used if the source is set to 'urls'.
+  start_urls:
+    - "some_valid_url_from_some_item_to_be_scraped"

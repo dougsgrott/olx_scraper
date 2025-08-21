@@ -193,6 +193,7 @@ cython_debug/
 
 # Local History for Visual Studio Code
 .history/
+ignore/
 
 # Built Visual Studio Code Extensions
 *.vsix
@@ -212,3 +213,9 @@ cython_debug/
 *.txt
 *.db
 *.sqlite
+
+# Remove all files and folders starting with _ign
+*_ign*
+
+# Remove run_config..yaml
+run_config.yaml
