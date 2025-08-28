@@ -46,6 +46,7 @@ class CatalogDetailsModel(Base):
     uid = Column(String(50))
     key = Column(String(20))
     value = Column(String(30))
+    uploaded_to_cloud = Column(Integer)
 
 
 class CatalogPricingModel(Base):
@@ -54,6 +55,7 @@ class CatalogPricingModel(Base):
     uid = Column(String(50))
     key = Column(String(20))
     value = Column(String(30))
+    uploaded_to_cloud = Column(Integer)
 
 
 class CatalogBagdesModel(Base):
@@ -61,6 +63,7 @@ class CatalogBagdesModel(Base):
     id = Column(Integer, primary_key=True)
     uid = Column(String(50))
     key = Column(String(20))
+    uploaded_to_cloud = Column(Integer)
 
 
 class AdInfoModel(Base):
@@ -84,6 +87,7 @@ class AdCharacteristicsModel(Base):
     code = Column(String(50))
     key = Column(String(50))
     value = Column(String(50))
+    uploaded_to_cloud = Column(Integer)
 
 
 class AdDetailsModel(Base):
@@ -92,6 +96,7 @@ class AdDetailsModel(Base):
     code = Column(String(50))
     key = Column(String(50))
     value = Column(String(50))
+    uploaded_to_cloud = Column(Integer)
 
 
 class AdPricingModel(Base):
@@ -100,3 +105,4 @@ class AdPricingModel(Base):
     code = Column(String(50))
     key = Column(String(50))
     value = Column(String(50))
+    uploaded_to_cloud = Column(Integer)

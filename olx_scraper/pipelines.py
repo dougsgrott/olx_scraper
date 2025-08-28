@@ -102,6 +102,7 @@ class SaveCatalogDetailsPipeline(BaseSavePipeline):
             entry.uid = item['uid']
             entry.key = k
             entry.value = v
+            entry.uploaded_to_cloud = item['uploaded_to_cloud']
             self.process_entry(entry, session)
         return item
 
@@ -115,6 +116,7 @@ class SaveCatalogPricingPipeline(BaseSavePipeline):
             entry.uid = item['uid']
             entry.key = k
             entry.value = v
+            entry.uploaded_to_cloud = item['uploaded_to_cloud']
             self.process_entry(entry, session)
         return item
 
@@ -127,6 +129,7 @@ class SaveCatalogBadgesPipeline(BaseSavePipeline):
             entry = CatalogBagdesModel()
             entry.uid = item['uid']
             entry.key = k
+            entry.uploaded_to_cloud = item['uploaded_to_cloud']
             self.process_entry(entry, session)
         return item
 
@@ -153,6 +156,7 @@ class SaveAdCharacteristicsPipeline(BaseSavePipeline):
             entry.code = item['code']
             entry.key = k
             entry.value = v
+            entry.uploaded_to_cloud = item['uploaded_to_cloud']
             self.process_entry(entry, session)
         return item
 
@@ -166,6 +170,7 @@ class SaveAdDetailsPipeline(BaseSavePipeline):
             entry.code = item['code']
             entry.key = k
             entry.value = v
+            entry.uploaded_to_cloud = item['uploaded_to_cloud']
             self.process_entry(entry, session)
         return item
 

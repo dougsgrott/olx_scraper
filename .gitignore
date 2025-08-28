@@ -213,9 +213,12 @@ ignore/
 *.txt
 *.db
 *.sqlite
+*.parquet
+*.gzip
 
 # Remove all files and folders starting with _ign
 *_ign*
 
 # Remove run_config..yaml
 run_config.yaml
+secrets.yaml
