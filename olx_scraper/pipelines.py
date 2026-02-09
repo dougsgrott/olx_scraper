@@ -86,7 +86,8 @@ class SaveCatalogInfoPipeline(BaseSavePipeline):
         session = self.factory()
         entry = CatalogInfoModel()
         fields = ["uid", "title", "location", "date", "code",
-                  "scraped_date", "url", "url_is_scraped", "url_scraped_date", "uploaded_to_cloud"]
+                  "scraped_date", "url", "url_is_scraped", "url_scraped_date", "uploaded_to_cloud",
+                  "details", "pricing", "badges"]
         for k in fields:
             setattr(entry, k, item[k])
         self.process_entry(entry, session)
@@ -140,7 +141,8 @@ class SaveAdInfoPipeline(BaseSavePipeline):
         session = self.factory()
         entry = AdInfoModel()
         fields = ['date', 'breadcrumb', 'code', 'description', 'full_location', 'street_address', 'title',
-                  "scraped_date", "url", "uploaded_to_cloud"]
+                  "scraped_date", "url", "uploaded_to_cloud",
+                  "characteristics", "details", "pricing"]
         for k in fields:
             setattr(entry, k, item[k])
         self.process_entry(entry, session)
@@ -210,12 +212,12 @@ class UpdateCatalogDatabasePipeline(object):
 class DefaultValuesCatalogPipeline(object):
 
     def process_item(self, item, spider):
-        item.setdefault('badges', [])
+        item.setdefault('badges', '')
         item.setdefault('code', '')
         item.setdefault('date', '')
-        item.setdefault('details', {})
+        item.setdefault('details', '{}')
         item.setdefault('location', '')
-        item.setdefault('pricing', {})
+        item.setdefault('pricing', '{}')
         item.setdefault('scraped_date', datetime.now())
         item.setdefault('title', '')
         item.setdefault('uploaded_to_cloud', 0)
@@ -228,13 +230,13 @@ class DefaultValuesAdPipeline(object):
 
     def process_item(self, item, spider):
         item.setdefault('breadcrumb', '')
-        item.setdefault('characteristics', {})
+        item.setdefault('characteristics', '{}')
         item.setdefault('code', '')
         item.setdefault('date', '')
         item.setdefault('description', '')
-        item.setdefault('details', {})
+        item.setdefault('details', '{}')
         item.setdefault('full_location', '')
-        item.setdefault('pricing', {})
+        item.setdefault('pricing', '{}')
         item.setdefault('scraped_date', datetime.now())
         item.setdefault('street_address', '')
         item.setdefault('title', '')

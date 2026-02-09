@@ -11,193 +11,6 @@ from bs4 import BeautifulSoup
 from typing import List
 
 
-# def strip_strings(input: List[str]):
-#     # Strip leading and trailing whitespace/newlines
-#     return [item.strip() for item in input]
-
-
-# def remove_empty_strings(input: List[str]):
-#     # Remove empty or insignificant strings
-#     return [item for item in input if item]
-
-
-# def normalize_spacing_strings(input: List[str]):
-#     # Normalize spacing
-#     return [re.sub(r'\s+', ' ', item) for item in input]
-
-
-# def standardize_numeric_strings(input: List[str]):
-#     # Standardize numeric values (Ensure consistent format for price)
-#     # Keeping as a string, but properly formatted
-#     return [item.replace('R$ ', 'R$') for item in input]
-
-
-# def parse_title(input_list):
-#     input_string = ''.join(input_list)
-#     return input_string.strip()
-
-
-# def parse_address(input_list):
-#     input_string = ''.join(input_list)
-#     return input_string.strip()
-
-
-# def get_details_text(selector_list):
-#     text_list = []
-#     for html_string in selector_list:
-#         soup = BeautifulSoup(html_string, 'html.parser')
-#         text = soup.get_text()
-#         text_list.append(text)
-#     concat_text = '<br>'.join(text_list)
-#     return concat_text
-
-
-# def get_text_beautifulsoup(selector_list):
-#     text_list = []
-#     for html_string in selector_list:
-#         soup = BeautifulSoup(html_string, 'html.parser')
-#         text = soup.get_text()
-#         text_list.append(text)
-#     return text_list
-
-
-# def replace_str_list(selector_list, old_str, new_str):
-#     return [s.replace(old_str, new_str) for s in selector_list]
-
-
-# def parse_details_text(input_string):
-#     # 1. Remove all newline characters
-#     parsed_string = input_string.replace('\n', '')
-
-#     # 2. Remove all leading and trailing spaces
-#     parsed_string = parsed_string.strip()
-
-#     # 4. Remove any extra spaces around the units and words
-#     parsed_string = re.sub(r'\s+', ' ', parsed_string)
-
-#     # Remove extra spaces around commas
-#     parsed_string = parsed_string.replace(' ,', ',')
-#     parsed_string = parsed_string.replace(', ', ',')
-#     parsed_string = parsed_string.replace(' <br>', '<br>')
-#     parsed_string = parsed_string.replace('<br> ', '<br>')
-#     return parsed_string
-
-
-# def get_amenities_text(html_string):
-#     if html_string == []:
-#         return 'none'
-#     try:
-#         soup = BeautifulSoup(html_string[0], 'html.parser')
-#         text = soup.get_text()
-#     except:
-#         text = 'error'
-#     return text
-
-
-# def parse_amenities_text(input_string):
-#     # if '<br>' not in input_string:
-#     #     # replace \n\n with <br>
-
-#     parsed_string = re.sub(r'         ', '<br>', input_string)
-#     parsed_string = re.sub(r'\n\n+', '<br>', parsed_string)
-
-#     # 2. Remove all leading and trailing spaces
-#     parsed_string = parsed_string.strip()
-
-#     # remove spaces whitespace without using strip
-#     parsed_string = re.sub(r'\s+', ' ', parsed_string)
-#     parsed_string = parsed_string.replace(' <br>', '<br>')
-#     parsed_string = parsed_string.replace('<br> ', '<br>')
-
-#     # remove trainling and leading <br>
-#     parsed_string = parsed_string.strip('<br>')
-
-#     # replace contigous <br> with single <br>
-#     parsed_string = re.sub(r'(<br>)+', '<br>', parsed_string)
-
-#     return parsed_string
-
-
-# def get_values_text(html_string):
-#     if html_string == []:
-#         return 'none'
-#     try:
-#         soup = BeautifulSoup(html_string[0], 'html.parser')
-#         text = soup.get_text()
-#     except:
-#         text = 'error'
-#     return text
-
-
-# def parse_values_text(input_string):
-#     if '<br>' not in input_string:
-#         # replace \n\n with <br>
-#         parsed_string = re.sub(r'\n\n+', '<br>', input_string)
-
-#     # 2. Remove all leading and trailing spaces
-#     parsed_string = parsed_string.strip()
-
-#     # remove spaces whitespace without using strip
-#     parsed_string = re.sub(r'\s+', ' ', parsed_string)
-#     parsed_string = parsed_string.replace(' <br>', '<br>')
-#     parsed_string = parsed_string.replace('<br> ', '<br>')
-
-#     # remove trainling and leading <br>
-#     parsed_string = parsed_string.strip('<br>')
-
-#     return parsed_string
-
-
-# def convert_to_str(input):
-#     return str(input)
-
-
-# def process_headcrumbs(input):
-#     return ' -> '.join(input)
-
-
-# def parse_price_selectors(input):
-#     cleaned_data = strip_strings(input)
-#     cleaned_data = normalize_spacing_strings(cleaned_data)
-#     cleaned_data = remove_empty_strings(cleaned_data)
-#     cleaned_data = '<br>'.join(cleaned_data)
-#     return cleaned_data
-
-
-# def parse_price_text(text):
-#     # Default values
-#     price_value = None
-#     maintenance_fee = None
-#     iptu_tax = None
-#     price_is_undefined = 0
-
-#     # Extract price
-#     price_match = re.search(r'R\$ ([0-9\.]*)', text)
-#     if price_match:
-#         price_value = int(price_match.group(1).replace('.', ''))
-#         price_is_undefined = 0
-#     elif 'Sob consulta' in text:
-#         price_value = None
-#         price_is_undefined = 1
-
-#     # Extract maintenance fee
-#     cond_match = re.search(r'COND\. R\$<br>([0-9\.]*)', text)
-#     if cond_match:
-#         maintenance_fee = int(cond_match.group(1).replace('.', ''))
-    
-#     # Extract IPTU tax
-#     iptu_match = re.search(r'IPTU R\$<br>([0-9\.]*)', text)
-#     if iptu_match:
-#         iptu_tax = int(iptu_match.group(1).replace('.', ''))
-    
-#     return {
-#         'price_value': price_value,
-#         'maintenance_fee': maintenance_fee,
-#         'iptu_tax': iptu_tax,
-#         'price_is_undefined': price_is_undefined,
-#     }
-
-
 class CatalogItem(scrapy.Item):
 
     @staticmethod
@@ -217,17 +30,9 @@ class CatalogItem(scrapy.Item):
             label = detail.get('aria-label', '').strip()
             if not label:
                 continue
-            # Normalize key
-            key = label#.lower().replace(' ', '_')
-            # Extract first number (integer or float)
-            match = re.search(r'\d+(?:[\.,]\d+)?', label)
-            if match:
-                value_str = match.group(0).replace(',', '.')
-            #     value = float(value_str) if '.' in value_str else int(value_str)
-            # else:
-            #     value = label # Fallback: store original string if no number found
-            details_dict[key] = value_str
-        return details_dict
+            value_str = detail.text.strip()
+            details_dict[label] = value_str
+        return str(details_dict)
 
     @staticmethod
     def process_badges(input):
@@ -237,7 +42,7 @@ class CatalogItem(scrapy.Item):
             label = badge.get('aria-label', '').strip() or badge.get_text(strip=True)
             if label:
                 badges.append(label)
-        return [badges]
+        return str(badges)
 
 
 
@@ -255,8 +60,7 @@ class CatalogItem(scrapy.Item):
             if ' ' in text:
                 key, value = text.split(' ', 1)
                 price_info_dict[key.lower()] = value
-        print(price_info_dict)
-        return price_info_dict
+        return str(price_info_dict)
 
     @staticmethod
     def process_bottom_body(input):
@@ -270,7 +74,7 @@ class CatalogItem(scrapy.Item):
         date_tag = soup.select_one('.olx-adcard__date')
         if date_tag:
             info_dict['date'] = date_tag.get_text(strip=True)
-        print(info_dict)
+        # print(info_dict)
         return info_dict
 
     @staticmethod
@@ -301,7 +105,6 @@ class CatalogItem(scrapy.Item):
     details = scrapy.Field(input_processor=process_details)
     badges = scrapy.Field(input_processor=process_badges)
     pricing = scrapy.Field(input_processor=process_pricing)
-    # bottom_body = scrapy.Field(input_processor=process_bottom_body)
     date = scrapy.Field(input_processor=process_date)
     location = scrapy.Field(input_processor=process_location)
     code = scrapy.Field(input_processor=process_code)
@@ -360,7 +163,7 @@ class AdItem(scrapy.Item):
             pricing_dict['current_price'] = current_price
         if listing_type != None:
             pricing_dict['listing_type'] = listing_type
-        return pricing_dict
+        return str(pricing_dict)
 
     @staticmethod
     def process_details(input):
@@ -377,7 +180,7 @@ class AdItem(scrapy.Item):
                     label = texts[0].get_text(strip=True)
                     value = texts[1].get_text(strip=True)
                     details[label] = value
-        return details
+        return str(details)
 
     @staticmethod
     def process_location(input):
@@ -421,7 +224,7 @@ class AdItem(scrapy.Item):
             for value in values:
                 if value not in inverted:
                     inverted[value] = key
-        return inverted
+        return str(inverted)
 
     @staticmethod
     def process_date(input):
@@ -440,21 +243,17 @@ class AdItem(scrapy.Item):
         return output_text
 
     uid = scrapy.Field()
-    title = scrapy.Field(input_processor=process_title, output_processor=TakeFirst())
-    description = scrapy.Field(input_processor=process_description, output_processor=TakeFirst())
-    pricing = scrapy.Field(input_processor=process_pricing, output_processor=TakeFirst())
-    street_address = scrapy.Field(input_processor=process_street_address, output_processor=TakeFirst())
-    full_location = scrapy.Field(input_processor=process_full_location, output_processor=TakeFirst())
-    details = scrapy.Field(input_processor=process_details, output_processor=TakeFirst())
-    characteristics = scrapy.Field(input_processor=process_characteristics, output_processor=TakeFirst())
-    date = scrapy.Field(input_processor=process_date, output_processor=TakeFirst())
-    breadcrumb = scrapy.Field(input_processor=process_breadcrumb, output_processor=TakeFirst())
-    code = scrapy.Field(input_processor=process_code, output_processor=TakeFirst())
+    title = scrapy.Field(input_processor=process_title)
+    description = scrapy.Field(input_processor=process_description)
+    pricing = scrapy.Field(input_processor=process_pricing)
+    street_address = scrapy.Field(input_processor=process_street_address)
+    full_location = scrapy.Field(input_processor=process_full_location)
+    details = scrapy.Field(input_processor=process_details)
+    characteristics = scrapy.Field(input_processor=process_characteristics)
+    date = scrapy.Field(input_processor=process_date)
+    breadcrumb = scrapy.Field(input_processor=process_breadcrumb)
+    code = scrapy.Field(input_processor=process_code)
 
     uploaded_to_cloud = scrapy.Field()
     scraped_date = scrapy.Field()
     url = scrapy.Field(output_processor=TakeFirst())
-
-    # url = scrapy.Field(input_processor=process_url, output_processor=TakeFirst())
-    # is_scraped = scrapy.Field(input_processor=process_is_scraped, output_processor=TakeFirst())
-    # scraped_date = scrapy.Field(input_processor=process_scraped_date, output_processor=TakeFirst())

@@ -37,9 +37,9 @@ class AdSpider(Spider):
         'ITEM_PIPELINES': {
             'olx_scraper.pipelines.DefaultValuesAdPipeline': 110,
             'olx_scraper.pipelines.SaveAdInfoPipeline': 200,
-            'olx_scraper.pipelines.SaveAdCharacteristicsPipeline': 210,
-            'olx_scraper.pipelines.SaveAdDetailsPipeline': 220,
-            'olx_scraper.pipelines.SaveAdPricingPipeline': 220,
+            # 'olx_scraper.pipelines.SaveAdCharacteristicsPipeline': 210,
+            # 'olx_scraper.pipelines.SaveAdDetailsPipeline': 220,
+            # 'olx_scraper.pipelines.SaveAdPricingPipeline': 220,
             'olx_scraper.pipelines.UpdateCatalogDatabasePipeline': 300,
         },
         'LOG_LEVEL': 'INFO',
@@ -116,6 +116,7 @@ class AdSpider(Spider):
     def parse(self, response):
         print(f"Processing URL: {response.url}")
         item_loader = ItemLoader(AdItem(), selector=response)
+        item_loader.default_output_processor = TakeFirst()
         characteristics = self._parse_characteristics(response)
         item_loader.add_xpath('breadcrumb', "//nav[@data-ds-component='DS-Breadcrumb']")
         item_loader.add_value('characteristics', characteristics)
