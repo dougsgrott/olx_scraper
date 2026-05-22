@@ -36,15 +36,14 @@ class DuplicatesCatalogPipeline(object):
         create_table(engine)
         self.factory = sessionmaker(bind=engine)
 
-    def process_item(self, item, spider):
-        session = self.factory()
-        exist_title = session.query(CatalogInfoModel).filter_by(uid=item["uid"]).first()
-        if (exist_title is not None):
+    def process_item(self, item, spider=None):
+        with self.factory() as session:
+            exist_title = session.query(CatalogInfoModel).filter_by(uid=item["uid"]).first()
+        if exist_title is not None:
             settings.redundancy = settings.redundancy + 1
             settings.redundancy_streak = settings.redundancy_streak + 1
             raise DropItem("Duplicate item found: {}".format(item["title"]))
-        else:
-            return item
+        return item
 
 
 class BaseSavePipeline(object):
@@ -57,134 +56,125 @@ class BaseSavePipeline(object):
         create_table(engine)
         self.factory = sessionmaker(bind=engine)
 
-    def process_item(self, item, spider):
+    def process_item(self, item, spider=None):
         """
         Save real estate index in the database
         This method is called for every item pipeline component
         """
         raise NotImplementedError
 
-    def process_entry(self, entry, session):
-        try:
-            print('Entry added')
-            session.add(entry)
-            session.commit()
-            settings.saved = settings.saved + 1
-            settings.redundancy_streak = 0
-        except:
-            print('rollback')
-            session.rollback()
-            raise
-        finally:
-            session.close()
+    def process_entry(self, entry):
+        # `with` guarantees the connection is returned to the pool, even on
+        # error or when the caller's loop never runs.
+        with self.factory() as session:
+            try:
+                session.add(entry)
+                session.commit()
+                settings.saved = settings.saved + 1
+                settings.redundancy_streak = 0
+            except:
+                session.rollback()
+                raise
         return None
 
 
 class SaveCatalogInfoPipeline(BaseSavePipeline):
 
-    def process_item(self, item, spider):
-        session = self.factory()
+    def process_item(self, item, spider=None):
         entry = CatalogInfoModel()
         fields = ["uid", "title", "location", "date", "code",
                   "scraped_date", "url", "url_is_scraped", "url_scraped_date", "uploaded_to_cloud"]
         for k in fields:
             setattr(entry, k, item[k])
-        self.process_entry(entry, session)
+        self.process_entry(entry)
         return item
 
 
 class SaveCatalogDetailsPipeline(BaseSavePipeline):
 
-    def process_item(self, item, spider):
-        session = self.factory()
+    def process_item(self, item, spider=None):
         for k, v in item['details'].items():
             entry = CatalogDetailsModel()
             entry.uid = item['uid']
             entry.key = k
             entry.value = v
             entry.uploaded_to_cloud = item['uploaded_to_cloud']
-            self.process_entry(entry, session)
+            self.process_entry(entry)
         return item
 
 
 class SaveCatalogPricingPipeline(BaseSavePipeline):
 
-    def process_item(self, item, spider):
-        session = self.factory()
+    def process_item(self, item, spider=None):
         for k, v in item['pricing'].items():
             entry = CatalogPricingModel()
             entry.uid = item['uid']
             entry.key = k
             entry.value = v
             entry.uploaded_to_cloud = item['uploaded_to_cloud']
-            self.process_entry(entry, session)
+            self.process_entry(entry)
         return item
 
 
 class SaveCatalogBadgesPipeline(BaseSavePipeline):
 
-    def process_item(self, item, spider):
-        session = self.factory()
+    def process_item(self, item, spider=None):
         for k in item['badges']:
             entry = CatalogBagdesModel()
             entry.uid = item['uid']
             entry.key = k
             entry.uploaded_to_cloud = item['uploaded_to_cloud']
-            self.process_entry(entry, session)
+            self.process_entry(entry)
         return item
 
 
 class SaveAdInfoPipeline(BaseSavePipeline):
 
-    def process_item(self, item, spider):
-        session = self.factory()
+    def process_item(self, item, spider=None):
         entry = AdInfoModel()
         fields = ['date', 'breadcrumb', 'code', 'description', 'full_location', 'street_address', 'title',
                   "scraped_date", "url", "uploaded_to_cloud"]
         for k in fields:
             setattr(entry, k, item[k])
-        self.process_entry(entry, session)
+        self.process_entry(entry)
         return item
 
 
 class SaveAdCharacteristicsPipeline(BaseSavePipeline):
 
-    def process_item(self, item, spider):
-        session = self.factory()
+    def process_item(self, item, spider=None):
         for k, v in item['characteristics'].items():
             entry = AdCharacteristicsModel()
             entry.code = item['code']
             entry.key = k
             entry.value = v
             entry.uploaded_to_cloud = item['uploaded_to_cloud']
-            self.process_entry(entry, session)
+            self.process_entry(entry)
         return item
 
 
 class SaveAdDetailsPipeline(BaseSavePipeline):
 
-    def process_item(self, item, spider):
-        session = self.factory()
+    def process_item(self, item, spider=None):
         for k, v in item['details'].items():
             entry = AdDetailsModel()
             entry.code = item['code']
             entry.key = k
             entry.value = v
             entry.uploaded_to_cloud = item['uploaded_to_cloud']
-            self.process_entry(entry, session)
+            self.process_entry(entry)
         return item
 
 
 class SaveAdPricingPipeline(BaseSavePipeline):
 
-    def process_item(self, item, spider):
-        session = self.factory()
+    def process_item(self, item, spider=None):
         for k, v in item['pricing'].items():
             entry = AdPricingModel()
             entry.code = item['code']
             entry.key = k
             entry.value = v
-            self.process_entry(entry, session)
+            self.process_entry(entry)
         return item
 
 
@@ -194,22 +184,19 @@ class UpdateCatalogDatabasePipeline(object):
         create_table(engine)
         self.factory = sessionmaker(bind=engine)
 
-    def process_item(self, item, spider):
-        session = self.factory()
-        # catalog = ImoveisSCCatalog()
-        # catalog.title = item["title"]
-
-        scraped_row = session.query(CatalogInfoModel).filter_by(code=item["code"]).first() # url=item["url"]
-        scraped_row.url_is_scraped = 1
-        scraped_row.url_scraped_date = datetime.now()
-
-        session.commit()
-        session.close()
+    def process_item(self, item, spider=None):
+        with self.factory() as session:
+            scraped_row = session.query(CatalogInfoModel).filter_by(code=item["code"]).first()
+            if scraped_row is not None:
+                scraped_row.url_is_scraped = 1
+                scraped_row.url_scraped_date = datetime.now()
+                session.commit()
+        return item
 
 
 class DefaultValuesCatalogPipeline(object):
 
-    def process_item(self, item, spider):
+    def process_item(self, item, spider=None):
         item.setdefault('badges', [])
         item.setdefault('code', '')
         item.setdefault('date', '')
@@ -226,7 +213,7 @@ class DefaultValuesCatalogPipeline(object):
 
 class DefaultValuesAdPipeline(object):
 
-    def process_item(self, item, spider):
+    def process_item(self, item, spider=None):
         item.setdefault('breadcrumb', '')
         item.setdefault('characteristics', {})
         item.setdefault('code', '')

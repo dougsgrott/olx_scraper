@@ -40,7 +40,7 @@ DOWNLOADER_MIDDLEWARES = {
 # ]
 
 # Configure maximum concurrent requests performed by Scrapy (default: 16)
-CONCURRENT_REQUESTS = 8
+CONCURRENT_REQUESTS = 2
 
 # Configure a delay for requests for the same website (default: 0)
 # See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay
@@ -74,10 +74,6 @@ CONCURRENT_REQUESTS = 8
 #    'olx_scraper.middlewares.RealestateScraperDownloaderMiddleware': 543,
 #}
 
-DOWNLOADER_MIDDLEWAWARES = {
-    'olx_scraper.middlewares.CloudScraperMiddleware': 543, # Choose a priority
-    # Keep other middlewares as needed
-}
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
 # Enable or disable extensions
@@ -122,12 +118,31 @@ CONNECTION_STRING = 'sqlite:///' + os.path.join(file_path, os.path.join('scraped
 #HTTPCACHE_IGNORE_HTTP_CODES = []
 #HTTPCACHE_STORAGE = 'scrapy.extensions.httpcache.FilesystemCacheStorage'
 
-# DOWNLOAD_HANDLERS = {
-#     "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-#     "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-# }
+DOWNLOAD_HANDLERS = {
+    "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+    "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+}
 
-# TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
+TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
+
+PLAYWRIGHT_BROWSER_TYPE = "chromium"
+PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 30000
+
+# scrapy-playwright is aliased to patchright (see run.py). Per patchright's
+# anti-detection guidance: use a persistent profile, let patchright manage the
+# browser flags, keep the real viewport, and DO NOT inject a custom user_agent
+# (a faked UA creates inconsistencies that Cloudflare detects).
+# Because this context sets `user_data_dir`, scrapy-playwright launches it via
+# launch_persistent_context(), so every launch option must live here too.
+PLAYWRIGHT_CONTEXTS = {
+    "default": {
+        "user_data_dir": os.path.join(file_path, ".playwright_profile"),
+        "headless": True,
+        "no_viewport": True,
+        "locale": "pt-BR",
+        "timezone_id": "America/Sao_Paulo",
+    },
+}
 
 # SAVE_RAW_HTML = True
 
@@ -148,9 +163,4 @@ CONNECTION_STRING = 'sqlite:///' + os.path.join(file_path, os.path.join('scraped
 
 
 
-DOWNLOADER_MIDDLEWARES = {
-    'olx_scraper.middlewares.CloudScraperMiddleware': 543,
-    # Ensure other default middlewares are not conflicting.
-    # Scrapy's default HttpProxyMiddleware should be at a higher number (e.g., 750)
-    # if you are using proxies.
-}
+DOWNLOADER_MIDDLEWARES = {}

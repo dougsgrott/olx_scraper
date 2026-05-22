@@ -8,14 +8,14 @@ from scrapy import Request
 from scrapy.utils.project import get_project_settings
 from w3lib.html import remove_tags
 from datetime import datetime
+import os
 import sys
 import time
 import random
 import logging
 
 
-sys.path.append(r"C:\Users\douglas.sgrott_indic\Documents\Pet Projects\olx_scraper\olx_scraper")
-# import settings
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from items import AdItem
 from models import create_table, db_connect
 from models import CatalogInfoModel
@@ -26,10 +26,6 @@ class AdSpider(Spider):
     name = 'imoveis_sc_properties'
     handle_httpstatus_list = [403, 404]
     custom_settings = {
-        'DOWNLOADER_MIDDLEWARES': {
-            'olx_scraper.middlewares.CloudScraperMiddleware': 543,
-            'scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware': None,
-        },
         'AUTOTHROTTLE_ENABLED': True,
         'AUTOTHROTTLE_DEBUG': True,
         'DOWNLOAD_DELAY': 3,
@@ -74,14 +70,16 @@ class AdSpider(Spider):
             for row in rows_not_scraped:
                 # time.sleep(random.randint(self.min_delay, self.max_delay))
                 time.sleep(random.randint(3, 6))
-                yield Request(url=row.url, callback=self.parse, meta={'cloudflare_bypass': True}) # meta={'catalogo_id': row.id}
+                yield Request(url=row.url, callback=self.parse, meta={'playwright': True, 'playwright_page_goto_kwargs': {'wait_until': 'domcontentloaded'}}) # meta={'catalogo_id': row.id}
 
-    def start_requests(self):
+    async def start(self):
         if self.start_urls:
             for url in self.start_urls:
-                yield Request(url=url, callback=self.parse, meta={'cloudflare_bypass': True})
+                yield Request(url=url, callback=self.parse, meta={'playwright': True, 'playwright_page_goto_kwargs': {'wait_until': 'domcontentloaded'}})
         else:
-            yield from self.get_urls_from_db()
+            # async start() can't `yield from` a sync generator
+            for request in self.get_urls_from_db():
+                yield request
 
     def _parse_characteristics(self, response):
         all_features = {}

@@ -4,8 +4,6 @@ from scrapy.utils.project import get_project_settings
 from scrapy.exceptions import CloseSpider
 from scrapy.loader import ItemLoader
 from scrapy.spiders import Spider, signals
-import cloudscraper
-from scrapy.http import TextResponse
 import scrapy
 from itemloaders.processors import TakeFirst
 from datetime import datetime
@@ -21,7 +19,7 @@ from sqlalchemy.orm import sessionmaker
 import sys
 import os
 
-sys.path.append(r"C:\Users\douglas.sgrott_indic\Documents\Pet Projects\olx_scraper\olx_scraper")
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from items import CatalogItem, StatusItem
 
 
@@ -30,10 +28,6 @@ class CatalogSpider(Spider):
     handle_httpstatus_list = [403, 404]
 
     custom_settings = {
-        'DOWNLOADER_MIDDLEWARES': {
-            'olx_scraper.middlewares.CloudScraperMiddleware': 543,
-            'scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware': None,
-        },
         'AUTOTHROTTLE_ENABLED': True,
         'AUTOTHROTTLE_DEBUG': False,
         'DOWNLOAD_DELAY': 3,
@@ -46,7 +40,7 @@ class CatalogSpider(Spider):
            'olx_scraper.pipelines.SaveCatalogPricingPipeline': 220,
            'olx_scraper.pipelines.SaveCatalogBadgesPipeline': 230,
         },
-        'LOG_LEVEL': 'INFO',
+        'LOG_LEVEL': 'DEBUG',
         'LOG_FILE': 'logs/olx_catalog.log',
         'LOG_FILE_APPEND': False,
     }
@@ -81,21 +75,51 @@ class CatalogSpider(Spider):
         self.logger.info("Scraping Stats:\n" + pprint.pformat(stats))
         self.logger.info(f"Spider Closed. Reason: {reason}")
 
-    def start_requests(self):
+    def _playwright_request(self, url):
+        """Build a request routed through Playwright. Content is captured at
+        `domcontentloaded` (OLX server-renders its listings). We deliberately
+        avoid `playwright_page_methods`: scrapy-playwright runs a
+        `wait_for_load_state()` after each one, and waiting for the full `load`
+        event is unreliable on OLX's ad-heavy pages -- a single hanging tracker
+        stalls it past the navigation timeout."""
+        return scrapy.Request(
+            url=url,
+            callback=self.parse,
+            meta={
+                'playwright': True,
+                'playwright_page_goto_kwargs': {'wait_until': 'domcontentloaded'},
+            },
+        )
+
+    async def start(self):
         # Check if start_urls was actually provided
         if not hasattr(self, 'start_urls'):
             raise AttributeError("Spider was not started with start_urls. Please provide them with the -a flag (e.g., -a start_urls=http://...).")
-            
+
         for url in self.start_urls:
             self.logger.info(f"Scheduling request for: {url}")
-            yield scrapy.Request(url=url, callback=self.parse, meta={'cloudflare_bypass': True})
+            yield self._playwright_request(url)
 
 
     # 1. FOLLOWING LEVEL 1
     def parse(self, response):
-        self.page_items = []
         selector_str = '//div[@class="AdListing_adListContainer__ALQla"]/section'
         selectors = response.xpath(selector_str)
+
+        if not selectors:
+            # No ad cards: either Cloudflare blocked us or the page layout changed.
+            # Dump the HTML so the actual served page can be inspected.
+            dump_path = f"logs/blocked_{response.status}.html"
+            with open(dump_path, 'w', encoding='utf-8') as fh:
+                fh.write(response.text)
+            self.logger.warning(
+                f"No ad listings at {response.url} (HTTP {response.status}, "
+                f"{len(response.text)} chars). Saved served page to {dump_path} "
+                f"for inspection."
+            )
+            return
+
+        self.page_items = []
         for sel in selectors:
             yield self.populate_catalog(sel, response.url)
         time.sleep(random.randint(5, 8))
@@ -144,6 +168,12 @@ class CatalogSpider(Spider):
         # Extract pagination string
         pagination_str = response.xpath('//div[contains(@id, "total-of-ads")]/div/p/text()').get()
 
+        if not pagination_str:
+            self.logger.info(
+                f"No pagination info on {response.url}; treating as a single page."
+            )
+            return
+
         # Extract total number of ads using regex
         match = re.search(r'de\s+([\d.]+)', pagination_str)
         if match:
@@ -165,4 +195,4 @@ class CatalogSpider(Spider):
             next_url = urlunparse(parsed_url._replace(query=new_query))
 
             self.logger.info(f"Paginating: Scheduling next request for {next_url}")
-            yield scrapy.Request(url=next_url, callback=self.parse, meta={'cloudflare_bypass': True})
+            yield self._playwright_request(next_url)
