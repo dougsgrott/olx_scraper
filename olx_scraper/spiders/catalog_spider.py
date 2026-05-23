@@ -2,18 +2,15 @@ from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 
 from scrapy.exceptions import CloseSpider
-from scrapy.loader import ItemLoader
 from scrapy.spiders import Spider, signals
 import scrapy
-from itemloaders.processors import TakeFirst
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-import re
+import json
 import time
 import random
 import logging
 import pprint
-import hashlib
 from sqlalchemy.orm import sessionmaker
 
 import sys
@@ -35,10 +32,7 @@ class CatalogSpider(Spider):
         'ITEM_PIPELINES': {
            'olx_scraper.pipelines.DuplicatesCatalogPipeline': 100,
            'olx_scraper.pipelines.DefaultValuesCatalogPipeline': 110,
-           'olx_scraper.pipelines.SaveCatalogInfoPipeline': 200,
-           'olx_scraper.pipelines.SaveCatalogDetailsPipeline': 210,
-           'olx_scraper.pipelines.SaveCatalogPricingPipeline': 220,
-           'olx_scraper.pipelines.SaveCatalogBadgesPipeline': 230,
+           'olx_scraper.pipelines.SaveCatalogDataPipeline': 200,
         },
         'LOG_LEVEL': 'DEBUG',
         'LOG_FILE': 'logs/olx_catalog.log',
@@ -101,98 +95,169 @@ class CatalogSpider(Spider):
             yield self._playwright_request(url)
 
 
-    # 1. FOLLOWING LEVEL 1
-    def parse(self, response):
-        selector_str = '//div[@class="AdListing_adListContainer__ALQla"]/section'
-        selectors = response.xpath(selector_str)
+    _PROMOTED_PROPERTY_NAMES = {
+        'category', 'real_estate_type', 'condominio', 'iptu', 'size',
+        'rooms', 'bathrooms', 'garage_spaces',
+        're_features', 're_complex_features',
+    }
+    _BOOL_BADGE_FIELDS = (
+        ('is_featured', 'isFeatured'),
+        ('fixed_on_top', 'fixedOnTop'),
+        ('price_reduction_badge', 'priceReductionBadge'),
+        ('has_real_estate_highlight', 'hasRealEstateHighlight'),
+    )
 
-        if not selectors:
-            # No ad cards: either Cloudflare blocked us or the page layout changed.
-            # Dump the HTML so the actual served page can be inspected.
+    # 1. LISTING PARSE — driven by the page's __NEXT_DATA__ JSON
+    def parse(self, response):
+        page_props = self._page_props(response)
+
+        if page_props is None:
             dump_path = f"logs/blocked_{response.status}.html"
             with open(dump_path, 'w', encoding='utf-8') as fh:
                 fh.write(response.text)
             self.logger.warning(
-                f"No ad listings at {response.url} (HTTP {response.status}, "
-                f"{len(response.text)} chars). Saved served page to {dump_path} "
-                f"for inspection."
+                f"No __NEXT_DATA__ at {response.url} (HTTP {response.status}, "
+                f"{len(response.text)} chars). Saved served page to {dump_path}."
             )
             return
 
-        self.page_items = []
-        for sel in selectors:
-            yield self.populate_catalog(sel, response.url)
+        ads = page_props.get('ads') or []
+        page_index = page_props.get('pageIndex')
+        for i, ad in enumerate(ads):
+            yield self._build_item(ad, position=i, page_index=page_index)
+
         time.sleep(random.randint(5, 8))
-        yield from self.paginate(response)
-        # Breadcrumb: response.xpath(".//ol[contains(@class, 'olx-breadcrumb__list')]")[0].get()
+        yield from self.paginate(response, page_props)
 
-    # 2. SCRAPING LEVEL 1
-    def populate_catalog(self, selector, url):
-        item_loader = ItemLoader(item=CatalogItem(), selector=selector)
-        item_loader.default_output_processor = TakeFirst()
-        item_loader.add_xpath('badges', './/div[contains(@class, "olx-adcard__badges")]')
-        item_loader.add_xpath('code', './/a[contains(@class, "olx-adcard__link")]/@href')
-        item_loader.add_xpath('date', './/div[contains(@class, "olx-adcard__bottombody")]')
-        item_loader.add_xpath('details', './/div[contains(@class, "olx-adcard__details")]')
-        item_loader.add_xpath('location', './/div[contains(@class, "olx-adcard__bottombody")]')
-        item_loader.add_xpath('pricing', './/div[contains(@class, "olx-adcard__mediumbody")]')
-        item_loader.add_xpath('title', './/h2[contains(@class, "olx-adcard__title")]/text()')
-        item_loader.add_xpath('url', './/a[contains(@class, "olx-adcard__link")]/@href')
-        loaded_item = item_loader.load_item()
+    def _page_props(self, response):
+        """Parse <script id='__NEXT_DATA__'> and return props.pageProps (or None)."""
+        raw = response.xpath('//script[@id="__NEXT_DATA__"]/text()').get()
+        if not raw:
+            return None
+        try:
+            return json.loads(raw).get('props', {}).get('pageProps')
+        except (ValueError, TypeError):
+            return None
 
-        # Concatenate unique fields (safely)
-        uid_string = f"{loaded_item.get('title', '')}|{loaded_item.get('ad_location', '')}|{loaded_item.get('ad_date', '')}"
-        uid_hash = hashlib.md5(uid_string.encode('utf-8')).hexdigest()  # or use sha256
-        loaded_item['uid'] = uid_hash
+    def _build_item(self, ad, position, page_index):
+        loc = ad.get('locationDetails') or {}
+        properties = ad.get('properties') or []
+        props_by_name = {p.get('name'): p for p in properties if p.get('name')}
 
-        self.page_items.append(loaded_item)
-        return loaded_item
+        item = CatalogItem()
+        list_id = ad.get('listId')
+        uid_code = '' if list_id is None else str(list_id)
 
-    def create_hash(self, input_string: str) -> str: #, last_idx: int = 12
-        """
-        Generates a unique id
-        refs:
-        - md5: https://stackoverflow.com/questions/22974499/generate-id-from-string-in-python
-        - sha3: https://stackoverflow.com/questions/47601592/safest-way-to-generate-a-unique-hash
-        (- guid/uiid: https://stackoverflow.com/questions/534839/how-to-create-a-guid-uuid-in-python?noredirect=1&lq=1)
-        """
-        m = hashlib.md5()
-        input_string = input_string.encode('utf-8')
-        m.update(input_string)
-        unqiue_name = str(int(m.hexdigest(), 16))#[0:last_idx]
-        return unqiue_name
+        # listId is globally unique on OLX, so it doubles as both code and uid
+        # (the DuplicatesCatalogPipeline dedupes on uid).
+        item['uid']   = uid_code
+        item['code']  = uid_code
+        item['title'] = ad.get('subject') or ad.get('title') or ''
+        item['url']   = ad.get('friendlyUrl') or ad.get('url') or ''
 
+        # date: origListTime is unix seconds; render as ISO for human readability.
+        ts = ad.get('origListTime') or ad.get('date')
+        item['date'] = (
+            datetime.fromtimestamp(ts).isoformat(timespec='seconds')
+            if isinstance(ts, (int, float)) else (ts or '')
+        )
 
-    # 3. PAGINATION LEVEL 1
-    def paginate(self, response):
-        # Extract pagination string
-        pagination_str = response.xpath('//div[contains(@id, "total-of-ads")]/div/p/text()').get()
+        # location string (rendered) + structured components from locationDetails
+        item['location']      = ad.get('location') or ''
+        item['neighbourhood'] = loc.get('neighbourhood')
+        item['municipality']  = loc.get('municipality')
+        item['uf']            = loc.get('uf')
+        item['ddd']           = loc.get('ddd')
 
-        if not pagination_str:
+        # Dict-valued fields (serialized to JSON by SaveCatalogDataPipeline)
+        item['pricing']         = self._pricing_from_ad(ad)
+        item['characteristics'] = self._characteristics_from_properties(properties)
+        item['details']         = self._details_from_properties(properties)
+        item['badges']          = [name for name, key in self._BOOL_BADGE_FIELDS if ad.get(key)]
+
+        # Promoted property attributes
+        item['real_estate_type'] = self._prop(props_by_name, 'real_estate_type')
+        item['condominio']       = self._prop(props_by_name, 'condominio')
+        item['iptu']             = self._prop(props_by_name, 'iptu')
+        item['size']             = self._prop(props_by_name, 'size')
+        item['rooms']            = self._prop(props_by_name, 'rooms')
+        item['bathrooms']        = self._prop(props_by_name, 'bathrooms')
+        item['garage_spaces']    = self._prop(props_by_name, 'garage_spaces')
+
+        # Pricing extras
+        old_price = ad.get('oldPrice')
+        item['old_price'] = old_price if old_price else None
+
+        # Ad-level flags / metadata
+        item['category_name']             = ad.get('categoryName') or ad.get('category')
+        item['professional_ad']           = 1 if ad.get('professionalAd') else 0
+        item['is_featured']               = 1 if ad.get('isFeatured') else 0
+        item['fixed_on_top']              = 1 if ad.get('fixedOnTop') else 0
+        item['price_reduction_badge']     = 1 if ad.get('priceReductionBadge') else 0
+        item['has_real_estate_highlight'] = 1 if ad.get('hasRealEstateHighlight') else 0
+
+        if item['uid']=='' and item['title']=='':
+            return None
+        return item
+
+    def _pricing_from_ad(self, ad):
+        out = {}
+        price = ad.get('priceValue') or ad.get('price')
+        if price:
+            out['price'] = price
+        if ad.get('oldPrice'):
+            out['old_price'] = ad.get('oldPrice')
+        return out
+
+    @staticmethod
+    def _prop(props_by_name, name):
+        p = props_by_name.get(name)
+        return p.get('value') if p else None
+
+    def _characteristics_from_properties(self, properties):
+        """re_features + re_complex_features. Catalog gives them as a single
+        comma-separated string (no `values` list like ad-detail pages), so we
+        always split on comma."""
+        out = {}
+        for p in properties:
+            if p.get('name') in ('re_features', 're_complex_features'):
+                label = p.get('label') or p.get('name')
+                vals = p.get('values') or [
+                    v.strip() for v in (p.get('value') or '').split(',') if v.strip()
+                ]
+                out[label] = vals
+        return out
+
+    def _details_from_properties(self, properties):
+        return {p.get('label'): p.get('value')
+                for p in properties
+                if p.get('name') not in self._PROMOTED_PROPERTY_NAMES
+                and p.get('label')}
+
+    # 2. PAGINATION — driven by JSON pagination metadata, not a fragile regex
+    def paginate(self, response, page_props):
+        total_ads = page_props.get('totalOfAds')
+        page_size = page_props.get('pageSize')
+        current_page = page_props.get('pageIndex')
+
+        if not (isinstance(total_ads, int) and isinstance(page_size, int) and page_size):
             self.logger.info(
-                f"No pagination info on {response.url}; treating as a single page."
+                f"No pagination metadata on {response.url}; treating as a single page."
             )
             return
 
-        # Extract total number of ads using regex
-        match = re.search(r'de\s+([\d.]+)', pagination_str)
-        if match:
-            total_ads = int(match.group(1).replace('.', ''))
-            ads_per_page = 50
-            total_pages = (total_ads + ads_per_page - 1) // ads_per_page
-        else:
-            total_pages = 1
+        total_pages = (total_ads + page_size - 1) // page_size
+        if not isinstance(current_page, int) or current_page >= total_pages:
+            return
 
-        # Get current page from URL
+        # Build next page URL with ?o=N+1
         parsed_url = urlparse(response.url)
         query_params = parse_qs(parsed_url.query)
-        current_page = int(query_params.get('o', ['1'])[0])
+        query_params['o'] = [str(current_page + 1)]
+        new_query = urlencode(query_params, doseq=True)
+        next_url = urlunparse(parsed_url._replace(query=new_query))
 
-        if current_page < total_pages:
-            next_page = current_page + 1
-            query_params['o'] = [str(next_page)]
-            new_query = urlencode(query_params, doseq=True)
-            next_url = urlunparse(parsed_url._replace(query=new_query))
-
-            self.logger.info(f"Paginating: Scheduling next request for {next_url}")
-            yield self._playwright_request(next_url)
+        self.logger.info(
+            f"Paginating: page {current_page + 1}/{total_pages} -> {next_url}"
+        )
+        yield self._playwright_request(next_url)
