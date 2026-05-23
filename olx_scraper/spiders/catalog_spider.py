@@ -1,23 +1,12 @@
-from scrapy.crawler import CrawlerProcess
-from scrapy.utils.project import get_project_settings
-
-from scrapy.exceptions import CloseSpider
-from scrapy.spiders import Spider, signals
-import scrapy
+import json
+import pprint
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-import json
-import time
-import random
-import logging
-import pprint
-from sqlalchemy.orm import sessionmaker
 
-import sys
-import os
+import scrapy
+from scrapy.spiders import Spider, signals
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from items import CatalogItem, StatusItem
+from ..items import CatalogItem
 
 
 class CatalogSpider(Spider):
@@ -41,18 +30,8 @@ class CatalogSpider(Spider):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # We get the start_urls from the kwargs passed by the -a flag.
-        # We split by comma to allow passing multiple URLs in the future.
         if 'start_urls' in kwargs:
             self.start_urls = kwargs.get('start_urls').split(',')
-
-        # You can keep your other attributes here if needed
-        self.page_items = []
-        self.duplicated_page_count = 0
-        self.skipping = False
-        # self.planner = BasicSkipper(threshold=10, skip_n=10)
-        # self.min_delay = min_delay
-        # self.max_delay = max_delay
 
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
@@ -64,7 +43,7 @@ class CatalogSpider(Spider):
     def handle_spider_opened(self, spider):
         self.logger.info(f"Spider opened: {spider.name}")
 
-    def handle_spider_closed(self, reason=""):
+    def handle_spider_closed(self, spider, reason):
         stats = self.crawler.stats.get_stats()
         self.logger.info("Scraping Stats:\n" + pprint.pformat(stats))
         self.logger.info(f"Spider Closed. Reason: {reason}")
@@ -86,7 +65,6 @@ class CatalogSpider(Spider):
         )
 
     async def start(self):
-        # Check if start_urls was actually provided
         if not hasattr(self, 'start_urls'):
             raise AttributeError("Spider was not started with start_urls. Please provide them with the -a flag (e.g., -a start_urls=http://...).")
 
@@ -121,12 +99,9 @@ class CatalogSpider(Spider):
             )
             return
 
-        ads = page_props.get('ads') or []
-        page_index = page_props.get('pageIndex')
-        for i, ad in enumerate(ads):
-            yield self._build_item(ad, position=i, page_index=page_index)
+        for ad in page_props.get('ads') or []:
+            yield self._build_item(ad)
 
-        time.sleep(random.randint(5, 8))
         yield from self.paginate(response, page_props)
 
     def _page_props(self, response):
@@ -139,7 +114,7 @@ class CatalogSpider(Spider):
         except (ValueError, TypeError):
             return None
 
-    def _build_item(self, ad, position, page_index):
+    def _build_item(self, ad):
         loc = ad.get('locationDetails') or {}
         properties = ad.get('properties') or []
         props_by_name = {p.get('name'): p for p in properties if p.get('name')}

@@ -1,11 +1,6 @@
-from typing import Optional
-from sqlalchemy import create_engine, Column, String
-# from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Integer, String, DateTime, Float
-from sqlalchemy.orm import sessionmaker, declarative_base, Mapped, mapped_column, DeclarativeBase, Session
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, Text
+from sqlalchemy.orm import DeclarativeBase
 from scrapy.utils.project import get_project_settings
-import os
-from sqlalchemy import Text
 
 
 class Base(DeclarativeBase):
@@ -14,10 +9,9 @@ class Base(DeclarativeBase):
 def db_connect():
     """
     Performs database connection using database settings from settings.py.
-    Returns sqlaclchemy engine instance.
+    Returns sqlalchemy engine instance.
     """
     url = get_project_settings().get("CONNECTION_STRING")
-    os.makedirs('scraped_data', exist_ok=True)
     return create_engine(url)
 
 def create_table(engine):
@@ -27,7 +21,7 @@ def create_table(engine):
 class CatalogDataModel(Base):
     __tablename__ = "catalog_data"
     id = Column(Integer, primary_key=True)
-    uid = Column(String(50))
+    uid = Column(String(50), unique=True, index=True)
     title = Column(String(200))
     location = Column(String(50))
     date = Column(String(50))

@@ -8,10 +8,6 @@
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 import os
 
-redundancy = 0
-redundancy_streak = 0
-saved = 0
-
 BOT_NAME = 'olx_scraper'
 
 SPIDER_MODULES = ['olx_scraper.spiders']
@@ -32,12 +28,6 @@ DOWNLOADER_MIDDLEWARES = {
     # 'olx_scraper.middlewares.FakeResponseMiddleware': 543,
 }
 
-
-# FAKEUSERAGENT_PROVIDERS = [
-#     'scrapy_fake_useragent.providers.FakeUserAgentProvider',  # this is the first provider we'll try
-#     'scrapy_fake_useragent.providers.FakerProvider',  # if FakeUserAgentProvider fails, we'll use faker to generate a user-agent string for us
-#     'scrapy_fake_useragent.providers.FixedUserAgentProvider',  # fall back to USER_AGENT value
-# ]
 
 # Configure maximum concurrent requests performed by Scrapy (default: 16)
 CONCURRENT_REQUESTS = 2
@@ -82,20 +72,10 @@ USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 #    'scrapy.extensions.telnet.TelnetConsole': None,
 #}
 
-# Configure item pipelines
-# See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-# ITEM_PIPELINES = {
-#    'olx_scraper.pipelines.SaveImoveisSCCatalogPipeline': 200,
-#    'olx_scraper.pipelines.DuplicatesImoveisSCCatalogPipeline': 100,
-# }
-
 file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 # Create the 'scraped_data' directory if it doesn't exist
 os.makedirs(os.path.join(file_path, 'scraped_data'), exist_ok=True)
 CONNECTION_STRING = 'sqlite:///' + os.path.join(file_path, os.path.join('scraped_data', 'olx.sqlite'))
-# CONNECTION_STRING = 'sqlite:///' + os.path.join(file_path, os.path.join('scraped_data', 'html_imoveis_sc.sqlite'))
-
-# CONNECTION_STRING = 'sqlite:///imoveis_sc.db'
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
@@ -148,19 +128,3 @@ PLAYWRIGHT_CONTEXTS = {
 
 # Enable fake scraping mode
 # USE_FAKE_SCRAPING = True
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-DOWNLOADER_MIDDLEWARES = {}

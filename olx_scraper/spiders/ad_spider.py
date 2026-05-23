@@ -1,30 +1,15 @@
-#import scrapy
-from scrapy.crawler import CrawlerProcess
+import json
 
-from itemloaders import ItemLoader
-from itemloaders.processors import MapCompose, TakeFirst
 from scrapy.spiders import Spider
 from scrapy import Request
-from scrapy.utils.project import get_project_settings
-from w3lib.html import remove_tags
-from datetime import datetime
-import json
-import os
-import sys
-import time
-import random
-import logging
-
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from items import AdItem
-from models import create_table, db_connect
-from models import CatalogDataModel
 from sqlalchemy.orm import sessionmaker
+
+from ..items import AdItem
+from ..models import create_table, db_connect, CatalogDataModel
 
 
 class AdSpider(Spider):
-    name = 'imoveis_sc_properties'
+    name = 'olx_ad'
     handle_httpstatus_list = [403, 404]
     custom_settings = {
         'AUTOTHROTTLE_ENABLED': True,
@@ -34,26 +19,19 @@ class AdSpider(Spider):
         'ITEM_PIPELINES': {
             'olx_scraper.pipelines.DefaultValuesAdPipeline': 110,
             'olx_scraper.pipelines.SaveAdDataPipeline': 200,
-            # 'olx_scraper.pipelines.UpdateCatalogDatabasePipeline': 300,
         },
         'LOG_LEVEL': 'INFO',
         'LOG_FILE': 'logs/olx_ad.log',
         'LOG_FILE_APPEND': False,
     }
 
-    def __init__(self, *args, **kwargs): # start_urls=None,    sys.path.append(r"C:\Users\douglas.sgrott_indic\Documents\Pet Projects\olx_scraper\olx_scraper")
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
         start_urls_arg = kwargs.get('start_urls')
-        if 'start_urls' in kwargs:
-            self.start_urls = kwargs.get('start_urls').split(',')
-        if start_urls_arg:
-            if isinstance(start_urls_arg, str):
-                self.start_urls = [url.strip() for url in start_urls_arg.split(',') if url.strip()]
-            elif isinstance(start_urls_arg, list):
-                self.start_urls = start_urls_arg
-            else:
-                self.start_urls = []
+        if isinstance(start_urls_arg, str):
+            self.start_urls = [url.strip() for url in start_urls_arg.split(',') if url.strip()]
+        elif isinstance(start_urls_arg, list):
+            self.start_urls = start_urls_arg
         else:
             self.start_urls = []
 
@@ -64,11 +42,8 @@ class AdSpider(Spider):
 
         with Session() as session:
             rows_not_scraped = session.query(CatalogDataModel).filter(CatalogDataModel.url_is_scraped == 0).all()
-
             for row in rows_not_scraped:
-                # time.sleep(random.randint(self.min_delay, self.max_delay))
-                time.sleep(random.randint(3, 6))
-                yield Request(url=row.url, callback=self.parse, meta={'playwright': True, 'playwright_page_goto_kwargs': {'wait_until': 'domcontentloaded'}}) # meta={'catalogo_id': row.id}
+                yield Request(url=row.url, callback=self.parse, meta={'playwright': True, 'playwright_page_goto_kwargs': {'wait_until': 'domcontentloaded'}})
 
     async def start(self):
         if self.start_urls:
@@ -85,7 +60,7 @@ class AdSpider(Spider):
     }
 
     def parse(self, response):
-        print(f"Processing URL: {response.url}")
+        self.logger.info(f"Processing URL: {response.url}")
 
         ad = self._initial_data(response)
         if ad is None:
@@ -174,9 +149,7 @@ class AdSpider(Spider):
 
     def _characteristics_from_properties(self, properties):
         """Build the characteristics dict from ad['properties'] re_features /
-        re_complex_features entries -- the same data the old
-        `_parse_characteristics` xpath used to find under
-        'Características do imóvel' / 'Características do condomínio'."""
+        re_complex_features entries."""
         out = {}
         for p in properties:
             if p.get('name') in ('re_features', 're_complex_features'):
