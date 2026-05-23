@@ -1,9 +1,6 @@
 from itemadapter import ItemAdapter
 from sqlalchemy.orm import sessionmaker, Session
-# from models import CatalogModel, PropertyModel, HtmlCatalogModel, HtmlPropertyModel, BasicInfoModel, DetailsModel, create_table, db_connect
-from models import create_table, db_connect
-from models import CatalogInfoModel, CatalogDetailsModel, CatalogPricingModel, CatalogBagdesModel
-from models import AdInfoModel, AdCharacteristicsModel, AdDetailsModel, AdPricingModel
+from models import create_table, db_connect, CatalogDataModel, AdDataModel
 import json
 from itemadapter import ItemAdapter
 from datetime import datetime
@@ -38,7 +35,7 @@ class DuplicatesCatalogPipeline(object):
 
     def process_item(self, item, spider=None):
         with self.factory() as session:
-            exist_title = session.query(CatalogInfoModel).filter_by(uid=item["uid"]).first()
+            exist_title = session.query(CatalogDataModel).filter_by(uid=item["uid"]).first()
         if exist_title is not None:
             settings.redundancy = settings.redundancy + 1
             settings.redundancy_streak = settings.redundancy_streak + 1
@@ -78,103 +75,60 @@ class BaseSavePipeline(object):
         return None
 
 
-class SaveCatalogInfoPipeline(BaseSavePipeline):
+class SaveCatalogDataPipeline(BaseSavePipeline):
+    JSON_FIELDS = {'details', 'pricing', 'badges', 'characteristics'}
 
     def process_item(self, item, spider=None):
-        entry = CatalogInfoModel()
-        fields = ["uid", "title", "location", "date", "code",
-                  "scraped_date", "url", "url_is_scraped", "url_scraped_date", "uploaded_to_cloud"]
+        entry = CatalogDataModel()
+        fields = [
+            'uid', 'title', 'location', 'date', 'code',
+            'scraped_date', 'url', 'url_is_scraped', 'url_scraped_date', 'uploaded_to_cloud',
+            'details', 'pricing', 'badges',
+            # Promoted from ads[i].properties:
+            'real_estate_type', 'condominio', 'iptu', 'size',
+            'rooms', 'bathrooms', 'garage_spaces', 'characteristics',
+            # Pricing extras:
+            'old_price',
+            # Structured location:
+            'neighbourhood', 'municipality', 'uf', 'ddd',
+            # Ad-level flags / metadata:
+            'category_name', 'professional_ad', 'is_featured', 'fixed_on_top',
+            'price_reduction_badge', 'has_real_estate_highlight',
+        ]
         for k in fields:
-            setattr(entry, k, item[k])
+            val = item.get(k)
+            if k in self.JSON_FIELDS and val is not None:
+                val = json.dumps(val, ensure_ascii=False)
+            setattr(entry, k, val)
         self.process_entry(entry)
         return item
 
 
-class SaveCatalogDetailsPipeline(BaseSavePipeline):
+class SaveAdDataPipeline(BaseSavePipeline):
+    JSON_FIELDS = {'characteristics', 'details', 'pricing'}
 
     def process_item(self, item, spider=None):
-        for k, v in item['details'].items():
-            entry = CatalogDetailsModel()
-            entry.uid = item['uid']
-            entry.key = k
-            entry.value = v
-            entry.uploaded_to_cloud = item['uploaded_to_cloud']
-            self.process_entry(entry)
-        return item
-
-
-class SaveCatalogPricingPipeline(BaseSavePipeline):
-
-    def process_item(self, item, spider=None):
-        for k, v in item['pricing'].items():
-            entry = CatalogPricingModel()
-            entry.uid = item['uid']
-            entry.key = k
-            entry.value = v
-            entry.uploaded_to_cloud = item['uploaded_to_cloud']
-            self.process_entry(entry)
-        return item
-
-
-class SaveCatalogBadgesPipeline(BaseSavePipeline):
-
-    def process_item(self, item, spider=None):
-        for k in item['badges']:
-            entry = CatalogBagdesModel()
-            entry.uid = item['uid']
-            entry.key = k
-            entry.uploaded_to_cloud = item['uploaded_to_cloud']
-            self.process_entry(entry)
-        return item
-
-
-class SaveAdInfoPipeline(BaseSavePipeline):
-
-    def process_item(self, item, spider=None):
-        entry = AdInfoModel()
-        fields = ['date', 'breadcrumb', 'code', 'description', 'full_location', 'street_address', 'title',
-                  "scraped_date", "url", "uploaded_to_cloud"]
+        entry = AdDataModel()
+        fields = [
+            'date', 'breadcrumb', 'code', 'description',
+            'full_location', 'street_address', 'title',
+            'scraped_date', 'url', 'uploaded_to_cloud',
+            'characteristics', 'details', 'pricing',
+            # Promoted from ad['properties']:
+            'real_estate_type', 'condominio', 'size',
+            'rooms', 'bathrooms', 'garage_spaces',
+            # Structured location:
+            'neighbourhood', 'neighbourhood_id',
+            'municipality', 'municipality_id',
+            'uf', 'zipcode', 'lat', 'lng',
+            'ddd', 'zone', 'zone_id', 'region',
+        ]
         for k in fields:
-            setattr(entry, k, item[k])
+            val = item.get(k)
+            if k in self.JSON_FIELDS and val is not None:
+                val = json.dumps(val, ensure_ascii=False)
+            setattr(entry, k, val)
         self.process_entry(entry)
-        return item
-
-
-class SaveAdCharacteristicsPipeline(BaseSavePipeline):
-
-    def process_item(self, item, spider=None):
-        for k, v in item['characteristics'].items():
-            entry = AdCharacteristicsModel()
-            entry.code = item['code']
-            entry.key = k
-            entry.value = v
-            entry.uploaded_to_cloud = item['uploaded_to_cloud']
-            self.process_entry(entry)
-        return item
-
-
-class SaveAdDetailsPipeline(BaseSavePipeline):
-
-    def process_item(self, item, spider=None):
-        for k, v in item['details'].items():
-            entry = AdDetailsModel()
-            entry.code = item['code']
-            entry.key = k
-            entry.value = v
-            entry.uploaded_to_cloud = item['uploaded_to_cloud']
-            self.process_entry(entry)
-        return item
-
-
-class SaveAdPricingPipeline(BaseSavePipeline):
-
-    def process_item(self, item, spider=None):
-        for k, v in item['pricing'].items():
-            entry = AdPricingModel()
-            entry.code = item['code']
-            entry.key = k
-            entry.value = v
-            self.process_entry(entry)
         return item
 
 
@@ -186,7 +140,7 @@ class UpdateCatalogDatabasePipeline(object):
 
     def process_item(self, item, spider=None):
         with self.factory() as session:
-            scraped_row = session.query(CatalogInfoModel).filter_by(code=item["code"]).first()
+            scraped_row = session.query(CatalogDataModel).filter_by(code=item["code"]).first()
             if scraped_row is not None:
                 scraped_row.url_is_scraped = 1
                 scraped_row.url_scraped_date = datetime.now()
@@ -196,8 +150,18 @@ class UpdateCatalogDatabasePipeline(object):
 
 class DefaultValuesCatalogPipeline(object):
 
+    _NEW_NULLABLE_FIELDS = (
+        'real_estate_type', 'condominio', 'iptu', 'size',
+        'rooms', 'bathrooms', 'garage_spaces',
+        'old_price',
+        'neighbourhood', 'municipality', 'uf', 'ddd',
+        'category_name', 'professional_ad', 'is_featured', 'fixed_on_top',
+        'price_reduction_badge', 'has_real_estate_highlight',
+    )
+
     def process_item(self, item, spider=None):
         item.setdefault('badges', [])
+        item.setdefault('characteristics', {})
         item.setdefault('code', '')
         item.setdefault('date', '')
         item.setdefault('details', {})
@@ -208,10 +172,19 @@ class DefaultValuesCatalogPipeline(object):
         item.setdefault('uploaded_to_cloud', 0)
         item.setdefault('url_is_scraped', 0)
         item.setdefault('url_scraped_date', None)
+        # New JSON-sourced scalar fields default to None (SQLite NULL).
+        for k in self._NEW_NULLABLE_FIELDS:
+            item.setdefault(k, None)
         return item
 
 
 class DefaultValuesAdPipeline(object):
+
+    _NEW_NULLABLE_FIELDS = (
+        'real_estate_type', 'condominio', 'size', 'rooms', 'bathrooms', 'garage_spaces',
+        'neighbourhood', 'neighbourhood_id', 'municipality', 'municipality_id',
+        'uf', 'zipcode', 'lat', 'lng', 'ddd', 'zone', 'zone_id', 'region',
+    )
 
     def process_item(self, item, spider=None):
         item.setdefault('breadcrumb', '')
@@ -226,4 +199,8 @@ class DefaultValuesAdPipeline(object):
         item.setdefault('street_address', '')
         item.setdefault('title', '')
         item.setdefault('uploaded_to_cloud', 0)
+        # New JSON-sourced scalar fields. Default to None so missing values
+        # land as SQLite NULL instead of empty string/zero.
+        for k in self._NEW_NULLABLE_FIELDS:
+            item.setdefault(k, None)
         return item
