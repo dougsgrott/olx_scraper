@@ -32,13 +32,34 @@ class BaseSavePipeline:
                 raise
 
 
-class DuplicatesCatalogPipeline(BaseSavePipeline):
+class ChangeDetectionCatalogPipeline(BaseSavePipeline):
+    """Drop items whose watched fields match the most recent prior snapshot
+    for the same uid; otherwise let the item flow through (with url_is_scraped
+    inherited from the prior row so AdSpider doesn't re-fetch the detail page).
+    """
+    WATCHED = ('pricing', 'old_price', 'price_reduction_badge')
+
     def process_item(self, item, spider=None):
         with self.factory() as session:
-            exist_title = session.query(CatalogDataModel).filter_by(uid=item["uid"]).first()
-        if exist_title is not None:
-            raise DropItem("Duplicate item found: {}".format(item["title"]))
-        return item
+            prior = (session.query(CatalogDataModel)
+                     .filter_by(uid=item['uid'])
+                     .order_by(CatalogDataModel.id.desc())
+                     .first())
+
+        if prior is None:
+            return item
+
+        for field in self.WATCHED:
+            new_val = item.get(field)
+            prior_val = getattr(prior, field)
+            if field == 'pricing' and prior_val:
+                prior_val = json.loads(prior_val)
+            if new_val != prior_val:
+                item['url_is_scraped'] = prior.url_is_scraped
+                item['url_scraped_date'] = prior.url_scraped_date
+                return item
+
+        raise DropItem(f"Unchanged ad: {item['uid']}")
 
 
 class SaveCatalogDataPipeline(BaseSavePipeline):

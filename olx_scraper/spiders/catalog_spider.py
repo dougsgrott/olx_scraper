@@ -19,7 +19,7 @@ class CatalogSpider(Spider):
         'DOWNLOAD_DELAY': 3,
         'ROBOTSTXT_OBEY': False,
         'ITEM_PIPELINES': {
-           'olx_scraper.pipelines.DuplicatesCatalogPipeline': 100,
+           'olx_scraper.pipelines.ChangeDetectionCatalogPipeline': 100,
            'olx_scraper.pipelines.DefaultValuesCatalogPipeline': 110,
            'olx_scraper.pipelines.SaveCatalogDataPipeline': 200,
         },
@@ -124,7 +124,8 @@ class CatalogSpider(Spider):
         uid_code = '' if list_id is None else str(list_id)
 
         # listId is globally unique on OLX, so it doubles as both code and uid
-        # (the DuplicatesCatalogPipeline dedupes on uid).
+        # (ChangeDetectionCatalogPipeline keys off uid to detect price changes
+        # across snapshots).
         item['uid']   = uid_code
         item['code']  = uid_code
         item['title'] = ad.get('subject') or ad.get('title') or ''
