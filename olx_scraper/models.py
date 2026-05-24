@@ -21,7 +21,7 @@ def create_table(engine):
 class CatalogDataModel(Base):
     __tablename__ = "catalog_data"
     id = Column(Integer, primary_key=True)
-    uid = Column(String(50), unique=True, index=True)
+    uid = Column(String(50), index=True)
     title = Column(String(200))
     location = Column(String(50))
     date = Column(String(50))
