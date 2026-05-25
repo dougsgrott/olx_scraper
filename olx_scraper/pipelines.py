@@ -90,6 +90,30 @@ class SaveAdDataPipeline(BaseSavePipeline):
         return item
 
 
+class MarkScrapedPipeline(BaseSavePipeline):
+    """After a successful ad-detail save, flip every catalog_data row matching
+    this ad's `code` (== OLX listId) to `url_is_scraped = 1` so AdSpider's
+    `url_is_scraped == 0` filter excludes it on the next run.
+
+    Updates all snapshots for the uid (the change-detection pipeline can leave
+    multiple rows per ad); this is idempotent and self-healing.
+    """
+
+    def process_item(self, item, spider=None):
+        code = item.get('code')
+        if not code:
+            return item
+        with self.factory() as session:
+            (session.query(CatalogDataModel)
+                .filter(CatalogDataModel.code == code)
+                .update({
+                    CatalogDataModel.url_is_scraped: 1,
+                    CatalogDataModel.url_scraped_date: datetime.now(),
+                }, synchronize_session=False))
+            session.commit()
+        return item
+
+
 class DefaultValuesCatalogPipeline:
     def process_item(self, item, spider=None):
         item.setdefault('scraped_date', datetime.now())
