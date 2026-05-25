@@ -228,3 +228,6 @@ secrets.yaml
 
 # Scraper logs and blocked-page dumps
 logs/
+
+.claude/
+docs/
