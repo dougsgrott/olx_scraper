@@ -19,6 +19,7 @@ class AdSpider(Spider):
         'ITEM_PIPELINES': {
             'olx_scraper.pipelines.DefaultValuesAdPipeline': 110,
             'olx_scraper.pipelines.SaveAdDataPipeline': 200,
+            'olx_scraper.pipelines.MarkScrapedPipeline': 300,
         },
         'LOG_LEVEL': 'INFO',
         'LOG_FILE': 'logs/olx_ad.log',
