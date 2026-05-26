@@ -63,6 +63,10 @@ class CatalogDataModel(Base):
     price_reduction_badge = Column(Integer)
     has_real_estate_highlight = Column(Integer)
 
+    # Deterministic surrogate linking a catalog version to its AdItem.
+    # SHA256 hex over uid + watched fields.
+    watched_state_fingerprint = Column(String(64), index=True)
+
 
 class AdDataModel(Base):
     __tablename__ = "ad_data"
@@ -102,3 +106,6 @@ class AdDataModel(Base):
     zone = Column(String(50))
     zone_id = Column(Integer)
     region = Column(String(200))
+
+    # Catalog version this ad-detail was scraped from.
+    watched_state_fingerprint = Column(String(64), index=True)
