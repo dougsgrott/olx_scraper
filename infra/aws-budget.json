@@ -1,0 +1,9 @@
+{
+  "BudgetName": "olx-scraper-monthly",
+  "BudgetLimit": {
+    "Amount": "5",
+    "Unit": "USD"
+  },
+  "BudgetType": "COST",
+  "TimeUnit": "MONTHLY"
+}

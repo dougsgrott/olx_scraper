@@ -1,0 +1,12 @@
+{
+  "Name": "olx_data",
+  "Description": "OLX scraper Athena workgroup — scoped result location and scan-byte guard",
+  "Configuration": {
+    "ResultConfiguration": {
+      "OutputLocation": "s3://BUCKET_NAME/athena-results/"
+    },
+    "EnforceWorkGroupConfiguration": true,
+    "PublishCloudWatchMetricsEnabled": true,
+    "BytesScannedCutoffPerQuery": 1073741824
+  }
+}
