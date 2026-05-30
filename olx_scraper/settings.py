@@ -68,9 +68,9 @@ USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
-#EXTENSIONS = {
-#    'scrapy.extensions.telnet.TelnetConsole': None,
-#}
+EXTENSIONS = {
+    'olx_scraper.extensions.CatalogEncounterExporter': 300,
+}
 
 file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 # Create the 'scraped_data' directory if it doesn't exist
@@ -117,7 +117,7 @@ PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 30000
 PLAYWRIGHT_CONTEXTS = {
     "default": {
         "user_data_dir": os.path.join(file_path, ".playwright_profile"),
-        "headless": True,
+        "headless": False,
         "no_viewport": True,
         "locale": "pt-BR",
         "timezone_id": "America/Sao_Paulo",

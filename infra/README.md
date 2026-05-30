@@ -12,7 +12,7 @@ olx-data-<account-id>/
 │   └── spider={catalog,ad}/
 │       └── dt=YYYY-MM-DD/
 │           └── region=<slug>/
-│               └── *.jsonl.gz          ← bronze; immutable snapshot encounters
+│               └── *.jsonl.gz          ← bronze; delta records (new or changed items only)
 ├── silver/
 │   └── <table>/
 │       └── dt=YYYY-MM-DD/
@@ -29,7 +29,7 @@ Tables expected in each layer:
 
 | Layer  | Table                   | Notes                                    |
 |--------|-------------------------|------------------------------------------|
-| raw    | `raw_catalog`           | All catalog spider encounters            |
+| raw    | `raw_catalog`           | Delta catalog encounters (new or changed fingerprint) |
 | raw    | `raw_ad`                | All ad spider encounters                 |
 | silver | `silver_catalog_events` | Deduped catalog versions                 |
 | silver | `silver_ads`            | Deduped ad details                       |
