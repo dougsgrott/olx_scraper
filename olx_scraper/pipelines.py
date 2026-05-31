@@ -55,6 +55,7 @@ class ChangeDetectionCatalogPipeline(BaseSavePipeline):
                      .first())
 
         if prior is None:
+            item['_is_new_version'] = True
             return item
 
         if prior.watched_state_fingerprint == fp:
@@ -62,6 +63,7 @@ class ChangeDetectionCatalogPipeline(BaseSavePipeline):
 
         item['url_is_scraped'] = prior.url_is_scraped
         item['url_scraped_date'] = prior.url_scraped_date
+        item['_is_new_version'] = False
         return item
 
     @classmethod

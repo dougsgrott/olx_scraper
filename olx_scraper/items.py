@@ -40,6 +40,7 @@ class CatalogItem(scrapy.Item):
     has_real_estate_highlight = scrapy.Field()
 
     watched_state_fingerprint = scrapy.Field()
+    _is_new_version = scrapy.Field()
 
 
 class AdItem(scrapy.Item):
