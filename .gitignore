@@ -230,5 +230,11 @@ secrets.yaml
 logs/
 
 .claude/
-docs/
 runs/
+.playwright_profile.blocked/
+
+# Terraform: local state, provider cache, and account-specific variables
+infra/terraform/.terraform/
+infra/terraform/*.tfstate*
+infra/terraform/terraform.tfvars
+docs/

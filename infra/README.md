@@ -1,188 +1,123 @@
 # infra — OLX Scraper AWS Infrastructure
 
-One-time setup of the cloud-side foundation. All resources are created by a human running `infra/bootstrap.sh`; the JSON files here are the source of truth for policies, workgroup configuration, and budget definition.
+All AWS resources are managed by **Terraform** (`infra/terraform/`). The recurring
+data pipeline (bronze upload, silver/gold transforms) is driven by
+**`scripts/pipeline.py`** — no console SQL, no hand-substituted tokens.
+
+The original `bootstrap.sh` + JSON-policy workflow was retired in July 2026; the
+existing resources were imported into Terraform state (see git history for the
+old files).
+
+## Layout
+
+```
+infra/
+├── terraform/          ← ALL resource definitions (the source of truth)
+│   ├── main.tf         provider, account-derived locals (bucket name)
+│   ├── variables.tf    profile, region, budget email
+│   ├── storage.tf      S3 bucket, Athena workgroup, budget
+│   ├── glue.tf         Glue database + raw/silver/gold table schemas
+│   ├── iam.tf          users, roles, inline policies (never access keys)
+│   └── outputs.tf      bucket name, workgroup, database, role ARNs
+├── silver/catalog_events.sql   INSERT template run by pipeline.py (per dt+region)
+└── gold/fact_listings.sql      full-rebuild INSERT run by pipeline.py
+```
+
+The `.sql` files are **pure, comment-free statements** (some clients flatten
+newlines, turning a leading `--` into a swallow-everything bug); rationale lives
+in `docs/`.
 
 ## S3 Prefix Layout
 
-Bucket: `olx-data-<account-id>`  (region: `us-east-1`)
+Bucket: `olx-data-<account-id>` (region: `us-east-1`, name derived from the
+caller's account — never hardcoded anywhere).
 
 ```
 olx-data-<account-id>/
 ├── raw/
-│   └── spider={catalog,ad}/
-│       └── dt=YYYY-MM-DD/
-│           └── region=<slug>/
-│               └── *.jsonl.gz          ← bronze; delta records (new or changed items only)
+│   └── spider={catalog,ad}/dt=YYYY-MM-DD/region=<slug>/*.jsonl.gz   ← bronze (delta: new uids)
 ├── silver/
-│   └── <table>/
-│       └── dt=YYYY-MM-DD/
-│           └── *.parquet               ← typed, deduped; rebuilt daily from bronze
+│   └── catalog_events/dt=YYYY-MM-DD/*.parquet     ← typed; region is a column
 ├── gold/
-│   └── <table>/
-│       └── *.parquet                   ← analyst-facing; rebuilt daily from silver
-└── athena-results/
-    └── <query-execution-id>/           ← Athena workgroup result location
-        └── *.csv / *.metadata
+│   └── fact_listings/*.parquet                    ← one row per uid; full rebuild
+└── athena-results/                                ← workgroup result location
 ```
 
-Tables expected in each layer:
+Tables (all in Glue database `olx_data`, schemas defined in `terraform/glue.tf`,
+partition projection — no crawlers): `raw_catalog`, `silver_catalog_events`,
+`fact_listings`. The dataset is a **listings snapshot** — one row per `uid`
+([ADR 0006](../docs/adr/0006-snapshot-listings-drop-fingerprint.md)).
 
-| Layer  | Table                   | Notes                                    |
-|--------|-------------------------|------------------------------------------|
-| raw    | `raw_catalog`           | Delta catalog encounters (new or changed fingerprint) |
-| raw    | `raw_ad`                | All ad spider encounters                 |
-| silver | `silver_catalog_events` | Deduped catalog versions                 |
-| silver | `silver_ads`            | Deduped ad details                       |
-| gold   | `fact_listing_versions` | One row per (uid, fingerprint) pair      |
-| gold   | `dim_location`          | Location dimension enriched from raw ad  |
+## Terraform workflow
 
-All Glue tables live in the `olx_data` database. Partition projection (configured per table in issues #0003+) makes Glue crawlers unnecessary.
+State is **local and gitignored** (`terraform/*.tfstate*`) — deliberate for a
+solo project; the state file is a critical artifact, keep a copy outside the
+repo. `terraform.tfvars` (budget email) is also gitignored.
 
-## Resource Map
+```bash
+cd infra/terraform
+terraform init                 # once per machine
+terraform plan                 # review any change / detect drift
+terraform apply                # human approves
+```
 
-| File | AWS Resource |
-|------|-------------|
-| `iam/home-box-policy.json` | Inline policy on IAM user `olx-scraper-home-box` |
-| `iam/stepfn-execution-role-trust.json` | Trust policy for IAM role `olx-stepfn-execution-role` |
-| `iam/stepfn-execution-role-policy.json` | Permission policy for `olx-stepfn-execution-role` |
-| `iam/eventbridge-stepfn-role-trust.json` | Trust policy for IAM role `olx-eventbridge-stepfn-role` |
-| `iam/eventbridge-stepfn-role-policy.json` | Permission policy for `olx-eventbridge-stepfn-role` |
-| `iam/analyst-policy.json` | Inline policy on IAM user `olx-scraper-analyst` |
-| `athena/workgroup.json` | Athena workgroup `olx_data` |
-| `aws-budget.json` | AWS Budget `olx-scraper-monthly` ($5/month actual-spend alert) |
+Any infra change (schema, policy, workgroup) is an edit here + `apply`. Glue
+schema changes are metadata-only (never touch S3 data). **Do not** hand-edit
+managed resources in the console/CLI — that shows up as drift on the next plan.
 
-### Placeholder tokens in JSON files
-
-The JSON files use three literal tokens that `bootstrap.sh` substitutes at runtime:
-
-| Token | Resolved to |
-|-------|------------|
-| `BUCKET_NAME` | `olx-data-<account-id>` |
-| `ACCOUNT_ID` | 12-digit AWS account ID |
-| `REGION` | AWS region (default `us-east-1`) |
-
-> **Do not edit the resolved values into the JSON files.** Keep the token form so the files are portable and contain no account-specific data.
+If state is ever lost: re-import with `import {}` blocks (resource IDs are in
+git history — `infra/terraform/imports.tf` before its post-import deletion).
 
 ## IAM Principals
 
-| Principal | Type | Profile name | Lives on |
-|-----------|------|-------------|----------|
-| `olx-scraper-home-box` | IAM user | `olx-scraper` | Home box `~/.aws/credentials` |
-| `olx-scraper-analyst` | IAM user | `olx-analyst` | Analyst machine `~/.aws/credentials` |
-| `olx-stepfn-execution-role` | IAM role | — | Assumed by `states.amazonaws.com` |
-| `olx-eventbridge-stepfn-role` | IAM role | — | Assumed by `events.amazonaws.com` |
+| Principal | Type | Profile | Purpose |
+|-----------|------|---------|---------|
+| `olx-scraper-home-box` | user | `olx-scraper` | bronze upload; `s3:PutObject` on `raw/*` ONLY |
+| `olx-pipeline` | user | `olx-pipeline` | pipeline.py transforms; S3 CRUD + Athena exec + Glue CRUD |
+| `olx-scraper-analyst` | user | `olx-analyst` | read-only S3/Athena/Glue; never on the home box |
+| `olx-stepfn-execution-role` | role | — | **vestigial** (Step Functions path superseded by pipeline.py) |
+| `olx-eventbridge-stepfn-role` | role | — | **vestigial**; delete both from iam.tf when certain |
 
-### Home-box permissions (write-only)
-`s3:PutObject` on `raw/*` — no `GetObject`, no `ListBucket`, no `DeleteObject`.
+Note: the stepfn policy lacks `s3:GetBucketLocation` (Athena needs it); the
+pipeline policy fixed this. If the stepfn path is ever revived, copy the fix.
 
-### Analyst permissions (read-only)
-`s3:GetObject` + `s3:ListBucket` on the whole bucket; Athena query in `olx_data` workgroup; Glue read on `olx_data` database. **Never place analyst credentials on the home box.**
+### Access keys — manual by design
 
-### Step Functions execution role
-Full S3 CRUD on the bucket (CTAS overwrites need `DeleteObject`); Athena execute + read on `olx_data` workgroup; Glue CRUD on `olx_data` database (CTAS needs `CreateTable`/`UpdateTable`/`DeleteTable`).
-
-### EventBridge → Step Functions role
-`states:StartExecution` on `*` (placeholder until the state machine ARN is known from issue #0005). **Scope this down once the state machine exists.**
-
-## Running the Bootstrap
-
-Prerequisites: AWS CLI v2, `python3` in PATH, credentials with IAM + S3 + Glue + Athena + Budgets permissions.
+Terraform never manages keys (they'd land in plaintext state). Create/rotate
+with the CLI:
 
 ```bash
-# From the repo root:
-bash infra/bootstrap.sh
+# create (shown once — save to ~/.aws/credentials before closing)
+aws iam create-access-key --user-name olx-pipeline --profile olx-bootstrap
+
+# rotate: create new, update credentials file, then deactivate + delete old
+aws iam list-access-keys --user-name olx-pipeline --profile olx-bootstrap
+aws iam update-access-key --user-name olx-pipeline --access-key-id <OLD> --status Inactive --profile olx-bootstrap
+aws iam delete-access-key --user-name olx-pipeline --access-key-id <OLD> --profile olx-bootstrap
 ```
 
-The script is largely idempotent — re-running skips already-existing resources (buckets, users, roles, databases, workgroups). Access keys are **not** idempotent; running twice creates a second key pair.
-
-Two manual steps require human action:
-
-1. **Budget email confirmation** — AWS sends a SNS subscription confirmation email; click the link.
-2. **Credential placement** — Copy the printed access keys to `~/.aws/credentials` on the respective machines. The `SecretAccessKey` is shown only once.
+Same pattern for `olx-scraper-home-box` and `olx-scraper-analyst`.
 
 ## Verification
 
-Run these after `bootstrap.sh` completes. All `aws` commands use the `olx-bootstrap` profile (the admin credentials used during the bootstrap). The home-box and analyst checks use their own profiles and are noted separately.
-
 ```bash
-# Set once for this shell session — every aws command below inherits it.
-export AWS_PROFILE=olx-bootstrap
-export AWS_REGION=us-east-1
-
-BUCKET=olx-data-$(aws sts get-caller-identity --query Account --output text)
-
-# 1. Bucket versioning + public-access-block
-aws s3api get-bucket-versioning --bucket "$BUCKET"
-# Expected: {"Status": "Enabled"}
-
-aws s3api get-public-access-block --bucket "$BUCKET"
-# Expected: all four BlockPublic* fields true
-
-# 2. Glue database
-aws glue get-database --name olx_data
-# Expected: {"Database": {"Name": "olx_data", ...}}
-
-# 3. Athena workgroup
-aws athena get-work-group --work-group olx_data
-# Expected: workgroup with ResultConfiguration.OutputLocation and BytesScannedCutoffPerQuery
-
-# 4. Trivial Athena query
-EXEC_ID=$(aws athena start-query-execution \
-  --query-string "SELECT 1" \
-  --work-group olx_data \
-  --query 'QueryExecutionId' --output text)
-sleep 5
-aws athena get-query-execution --query-execution-id "$EXEC_ID" \
-  --query 'QueryExecution.Status.State' --output text
-# Expected: SUCCEEDED
-
-# 5. No credentials in version control
-git grep -iE "AKIA[0-9A-Z]{16}"
-# Expected: no output
+cd infra/terraform && terraform plan     # expect: "No changes"
+uv run python scripts/pipeline.py verify # smoke query + silver typing + gold grain
+git grep -iE "AKIA[0-9A-Z]{16}"          # expect: no output
 ```
 
-**Home-box write test** — run on the home box after placing credentials there:
+## What stays manual (by design)
 
-```bash
-BUCKET=olx-data-<account-id>   # replace with your 12-digit account ID
+- `terraform apply` approval
+- access-key creation, placement, rotation
+- budget email confirmation (only if the budget is ever recreated)
+- running the pipeline (`docs/runbooks/catalog-transforms.md`)
 
-echo "test" > /tmp/test.txt
-aws s3 cp /tmp/test.txt "s3://${BUCKET}/raw/test.txt" --profile olx-scraper   # should succeed
-aws s3 ls "s3://${BUCKET}/" --profile olx-scraper                              # should return AccessDenied
-aws s3 rm "s3://${BUCKET}/raw/test.txt" --profile olx-scraper                  # should return AccessDenied
-```
+## Limitations to remember
 
-**Analyst read test** — run on the analyst machine after placing credentials there:
-
-```bash
-BUCKET=olx-data-<account-id>
-
-aws s3 ls "s3://${BUCKET}/raw/" --profile olx-analyst                          # should succeed
-aws s3 cp /tmp/test.txt "s3://${BUCKET}/raw/x" --profile olx-analyst           # should return AccessDenied
-```
-
-## Credential Rotation
-
-### Rotate home-box access key
-
-```bash
-OLD_KEY=$(aws iam list-access-keys --user-name olx-scraper-home-box \
-  --query 'AccessKeyMetadata[0].AccessKeyId' --output text)
-
-# Create new key (shown once — save before deactivating old)
-aws iam create-access-key --user-name olx-scraper-home-box
-
-# Update ~/.aws/credentials on the home box, then deactivate + delete old key:
-aws iam update-access-key --user-name olx-scraper-home-box \
-  --access-key-id "$OLD_KEY" --status Inactive
-aws iam delete-access-key --user-name olx-scraper-home-box \
-  --access-key-id "$OLD_KEY"
-```
-
-Repeat the same pattern for `olx-scraper-analyst`.
-
-## Notes
-
-- **No Terraform state** — the project scope (~12 AWS resources) does not justify a state backend. If the scope expands, the JSON files here are a clean starting point for `aws_iam_*`, `aws_s3_bucket`, `aws_glue_catalog_database`, `aws_athena_workgroup`, and `aws_budgets_budget` Terraform resources.
-- **No Glue crawlers** — all tables use partition projection configured per-table in issues #0003+.
-- **Athena-results prefix** — using a prefix in the same bucket rather than a dedicated bucket keeps the bucket policy simple and costs the same.
+- Terraform provisions metadata only; it never runs queries or moves data.
+- Renaming/recreating the bucket does **not** migrate objects — that's a manual
+  copy, then update nothing (the name is account-derived everywhere).
+- `pipeline.py` deliberately does not read Terraform outputs: it derives the
+  bucket from `sts get-caller-identity` at runtime, so it works on any machine
+  with credentials, no Terraform required.
