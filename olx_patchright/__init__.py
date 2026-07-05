@@ -1,6 +1,6 @@
 """Scrapy-free OLX catalogue scraper.
 
-Replaces the olx_scraper Scrapy project with plain patchright (sync API):
+Replaces the olx_scrapy Scrapy project with plain patchright (sync API):
 one persistent browser context, one page, sequential navigation. No Twisted
 reactor, no module aliasing, no per-scheme download handlers -- and therefore
 no SingletonLock races on .playwright_profile.

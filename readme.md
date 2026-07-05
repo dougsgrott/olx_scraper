@@ -1,152 +1,165 @@
 # OLX Scraper (for real estate)
 
-This Scrapy project is designed to perform a two-stage scrape of listings from OLX Brazil. It first scrapes catalog pages to gather a list of ad URLs and then scrapes the individual ad pages for detailed information. For know, it is being built primarily for real estate ads, possibly being generalized in the future.
+Builds a **snapshot dataset of OLX Brazil real-estate listings** — one row per
+ad (`uid`). A local box scrapes catalogue pages and stages results; AWS (S3 +
+Athena, provisioned by Terraform) owns durable storage and analytical query.
 
-## Project Goal
-
-The primary goal is to build a comprehensive database of real estate ads by:
-1.  **Cataloging:** Browsing listing pages to discover new ads.
-2.  **Ad scraping:** Visiting each ad page to extract in-depth information.
-3.  **Storing:** Saving all extracted data into a structured SQLite database for future analysis.
-
----
-
-## Features
-
-* **Two-Stage Scraping:** Utilizes separate spiders for catalog and ad pages for a modular and robust workflow.
-* **Anti-Bot Evasion:** Integrates the `cloudscraper` library via a custom middleware to bypass Cloudflare's anti-bot measures.
-* **Persistent Storage:** Uses SQLAlchemy and a SQLite database (`olx.sqlite`) to store scraped data, allowing for incremental scraping and data retention.
-* **Duplicate Prevention:** A pipeline drops ads whose `uid` (OLX `listId`) is already stored, keeping one row per listing (snapshot model).
-* **Data Normalization:** Employs `ItemLoaders` and custom processors in `items.py` to clean, parse, and structure the extracted data before storage.
-* **Structured Database:** Defines a clear database schema in `models.py` to store catalog and ad information across multiple related tables.
-* **Dynamic URL Handling:** The `AdSpider` can be run with a specific start URL or, if none is provided, it will automatically fetch unscraped URLs from the database.
+Ads are not tracked over time — no price history, no "still online" checks.
+`uid` is the sole key; one row per listing, first-seen wins
+([ADR 0006](docs/adr/0006-snapshot-listings-drop-fingerprint.md)).
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
 .
-├── logs/
-│   ├── olx_ad.log          # Log file for the Ad Spider
-│   └── olx_catalog.log     # Log file for the Catalog Spider
-├── scraped_data/
-│   └── olx.sqlite          # SQLite database file where all data is stored
-├── olx_scraper/
-│   ├── spiders/
-│   │   ├── __init__.py
-│   │   ├── catalog_spider.py   # Spider to scrape listing/catalog pages
-│   │   └── ad_spider.py        # Spider to scrape individual ad pages
-│   ├── __init__.py
-│   ├── items.py              # Defines the data structure (Items) and processors
-│   ├── middlewares.py        # Contains the CloudScraper anti-bot middleware
-│   ├── models.py             # Defines the SQLAlchemy database models/schema
-│   ├── pipelines.py          # Defines data processing and storage pipelines
-│   └── settings.py           # Scrapy project settings
-└── scrapy.cfg                # Scrapy project configuration file
+├── run_patchright.py     # ACTIVE entrypoint — plain patchright, no Scrapy
+├── run_scrapy.py         # LEGACY entrypoint — Scrapy + scrapy-playwright (being phased out)
+├── run_config.yaml       # shared config for both entrypoints (gitignored; copy from the example)
+├── run_config_example.yaml
+│
+├── olx_patchright/       # ACTIVE scraper package
+│   ├── browser.py        #   persistent-profile launch + SingletonLock preflight
+│   ├── parse.py          #   OLX App Router flight-payload parsing
+│   ├── db.py             #   SQLite dedupe/insert (same catalog_data table as legacy)
+│   ├── export.py         #   bronze .jsonl.gz + run manifest (same runs/ layout as legacy)
+│   ├── catalog.py        #   the scrape loop
+│   └── warm.py           #   interactive Cloudflare warm-up
+│
+├── olx_scrapy/           # LEGACY Scrapy project (catalog + ad spiders, SQLAlchemy models)
+│
+├── scripts/
+│   ├── pipeline.py       # cloud pipeline: bronze upload, silver/gold Athena transforms, verify
+│   └── warm_profile.py   # warm-up helper used by the legacy Scrapy entrypoint
+│
+├── infra/
+│   ├── terraform/        # all AWS resources (bucket, Glue tables, Athena workgroup, IAM)
+│   ├── silver/           # silver INSERT template (read by scripts/pipeline.py)
+│   └── gold/             # gold rebuild INSERT (read by scripts/pipeline.py)
+│
+├── runs/                 # local bronze staging (gitignored) — spider=catalog/dt=.../region=.../*.jsonl.gz
+├── scraped_data/         # SQLite database (olx.sqlite)
+└── docs/                 # ADRs, runbooks, glossary (docs/CONTEXT.md)
 ```
 
 ---
 
-## How It Works
-
-The scraping process is designed to be run in two distinct steps:
-
-### Step 1: Run the Catalog Spider
-
-The `CatalogSpider` (`olx_catalog`) is responsible for discovering ads.
-
-1.  It starts with a catalog URL (e.g., a search results page).
-2.  It extracts summary data for each ad on the page, including its title, location, price, and URL.
-3.  It generates a unique `uid` for each ad to handle duplicates.
-4.  The `DuplicatesCatalogPipeline` checks if the ad already exists in the database. If it does, the item is dropped.
-5.  If the ad is new, its information is saved to the `catalog_*` tables in the `olx.sqlite` database by the `SaveCatalog*` pipelines.
-6.  The spider automatically handles pagination, moving to the next page of results until no more ads are found.
-
-### Step 2: Run the Ad Spider
-
-The `AdSpider` (`imoveis_sc_properties`) is responsible for getting the details.
-
-1.  When started without a `start_urls` argument, it queries the `olx.sqlite` database for any ad URLs that have not yet been scraped (`url_is_scraped == 0`).
-2.  It visits each of these ad URLs.
-3.  It uses detailed XPath selectors to extract comprehensive information, such as the ad description, property characteristics (`Características`), details (bedrooms, bathrooms), and location.
-4.  The extracted data is processed and cleaned by the `AdItem` loader.
-5.  The `SaveAd*` pipelines save the detailed information into the `ad_*` tables in the database.
-6.  (Optional) A pipeline could be added to mark the URL as scraped in the `catalog_info` table to prevent re-scraping.
-
----
-
-## Setup and Installation
-
-Documentation work in progress
-
-<!-- 1.  **Clone the repository:**
-    ```bash
-    git clone <your-repo-url>
-    cd <your-repo-name>
-    ```
-
-2.  **Create a virtual environment (recommended):**
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
-    ```
-
-3.  **Install dependencies:**
-    This project requires Scrapy and other libraries. Create a `requirements.txt` file with the following content:
-    ```
-    Scrapy
-    cloudscraper
-    SQLAlchemy
-    bs4
-    ```
-    Then, install them:
-    ```bash
-    pip install -r requirements.txt
-    ``` -->
-
----
-
-## How to Run
-
-Documentation work in progress
-
-<!-- Make sure you are in the project's root directory (the one containing `scrapy.cfg`).
-
-### To Scrape a New Catalog
-
-Run the `olx_catalog` spider, providing a starting URL.
+## Setup
 
 ```bash
-scrapy crawl olx_catalog -a start_urls="[https://www.olx.com.br/imoveis/aluguel/estado-es](https://www.olx.com.br/imoveis/aluguel/estado-es)"
-``` -->
-
-### To Scrape Ad Details
-
-Documentation work in progress
-
-<!-- Once you have populated the database with catalog URLs, run the `imoveis_sc_properties` spider without any arguments. It will automatically find and scrape the pending URLs.
-
-```bash
-scrapy crawl imoveis_sc_properties
+uv sync
+cp run_config_example.yaml run_config.yaml   # then edit start_urls
 ```
 
-You can also run it on a single ad URL for testing purposes:
-
-```bash
-scrapy crawl imoveis_sc_properties -a start_urls="<url-of-a-single-ad>"
-``` -->
+AWS commands (`scripts/pipeline.py`) need credentials for the `olx-scraper` and
+`olx-pipeline` profiles in `~/.aws/credentials` — see
+[`infra/README.md`](infra/README.md).
 
 ---
 
-## Viewing the Data
+## Scraping the catalogue
 
-You can inspect the scraped data using any SQLite database browser (like [DB Browser for SQLite](https://sqlitebrowser.org/)). Simply open the `scraped_data/olx.sqlite` file to view the tables and their contents.
+`run_config.yaml` drives both entrypoints; only `mode` and
+`catalog_spider.start_urls` matter for the catalogue stage.
+
+```yaml
+mode: 'CATALOG'          # or 'WARM'
+catalog_spider:
+  start_urls:
+    - "https://www.olx.com.br/imoveis/aluguel/estado-es/norte-do-espirito-santo/vitoria/republica"
+```
+
+**First run (or whenever Cloudflare blocks you):** warm the persistent browser
+profile by hand.
+
+```bash
+uv run python run_patchright.py   # with mode: 'WARM'
+```
+
+A headful browser opens on the catalogue URL. Solve any Cloudflare challenge,
+wait for real listings to render, then press Enter in the terminal to save the
+profile (`.playwright_profile/`, gitignored) and close the browser.
+
+**Then scrape:**
+
+```bash
+uv run python run_patchright.py   # with mode: 'CATALOG'
+```
+
+This is the **active, recommended** path (see [ADR 0001](docs/adr/0001-scraper-on-home-box-not-aws.md)
+for why scraping happens on the home box rather than AWS). It prints a run
+manifest:
+
+```json
+{
+  "run_id": "20260705T103412",
+  "region": "estado-es_norte-do-espirito-santo_vitoria_republica",
+  "dt": "2026-07-05",
+  "total_seen": 5,
+  "new_items": 5,
+  "duplicate_items": 0,
+  "duration_s": 7.3
+}
+```
+
+`new_items` are appended to `scraped_data/olx.sqlite` (table `catalog_data`)
+and written to `runs/spider=catalog/dt=<dt>/region=<slug>/<run_id>.jsonl.gz`
+(bronze staging for the cloud pipeline below). Already-seen `uid`s are dropped
+— re-running the same URL is always safe.
+
+### Legacy Scrapy path
+
+`run_scrapy.py` (package `olx_scrapy/`) is the original Scrapy +
+scrapy-playwright implementation, kept only until fully retired. It reads the
+same `run_config.yaml` and additionally supports `mode: 'AD'` (per-ad detail
+scraping — not yet ported to `run_patchright.py`):
+
+```bash
+uv run python run_scrapy.py       # mode: 'CATALOG', 'AD', or 'WARM'
+```
+
+Do not run both entrypoints against the persistent profile at the same time —
+each holds `.playwright_profile/` exclusively (Chromium `SingletonLock`).
+
+---
+
+## Cloud pipeline
+
+Once bronze files exist in `runs/`, push them to S3 and rebuild the
+Athena-queryable layers with `scripts/pipeline.py` — see
+[`docs/runbooks/catalog-transforms.md`](docs/runbooks/catalog-transforms.md)
+for the full runbook (layer model, gotchas, verification queries).
+
+```bash
+uv run python scripts/pipeline.py upload                 # bronze: runs/ -> s3://.../raw/
+uv run python scripts/pipeline.py silver --dt 2026-07-05  # rebuild one day of silver
+uv run python scripts/pipeline.py gold                    # full-rebuild gold (fact_listings)
+uv run python scripts/pipeline.py verify                  # smoke query + typing + grain checks
+```
+
+`--dry-run` on any command prints what would happen without touching AWS.
+
+---
+
+## Infrastructure
+
+All AWS resources (S3 bucket, Glue tables, Athena workgroup, IAM users/roles,
+budget) are defined in `infra/terraform/` and applied with standard
+`terraform plan` / `terraform apply`. See [`infra/README.md`](infra/README.md)
+for the full workflow, IAM principal list, and credential rotation.
+
+---
+
+## Viewing local data
+
+Open `scraped_data/olx.sqlite` with any SQLite browser (e.g.
+[DB Browser for SQLite](https://sqlitebrowser.org/)) to inspect
+`catalog_data` directly, or query the cloud copy via Athena
+(`olx_data.raw_catalog` / `silver_catalog_events` / `fact_listings`).
 
 ## Next steps
 
-- Analyze scraped data and fix any kinks in data processing
-- Implement UpdateTable for catalog
-- Create sharding strategy for data organization
-- Create a planner to resume scraping
-- Ingest batched data to a cloud server
+- Retire `run_scrapy.py` / `olx_scrapy/` once `run_patchright.py` covers the ad stage too
+- Port ad-detail scraping to `olx_patchright/`
+- Build `dim_location` gold dimension

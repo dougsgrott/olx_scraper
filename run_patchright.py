@@ -1,12 +1,12 @@
-"""Entrypoint for the Scrapy-free OLX scraper (scraper/ package).
+"""Entrypoint for the Scrapy-free OLX scraper (olx_patchright/ package).
 
-Reads the same run_config.yaml as the old run.py:
+Reads the same run_config.yaml as the legacy run_scrapy.py:
 
     mode: 'CATALOG'  scrape catalogue pages (catalog_spider.start_urls)
     mode: 'WARM'     open a headful browser to solve Cloudflare by hand
                      (warm.url, falling back to catalog_spider.start_urls[0])
 
-    uv run python main.py
+    uv run python run_patchright.py
 """
 import json
 
