@@ -16,7 +16,7 @@ The primary goal is to build a comprehensive database of real estate ads by:
 * **Two-Stage Scraping:** Utilizes separate spiders for catalog and ad pages for a modular and robust workflow.
 * **Anti-Bot Evasion:** Integrates the `cloudscraper` library via a custom middleware to bypass Cloudflare's anti-bot measures.
 * **Persistent Storage:** Uses SQLAlchemy and a SQLite database (`olx.sqlite`) to store scraped data, allowing for incremental scraping and data retention.
-* **Duplicate Prevention:** A pipeline checks for duplicate ads based on a unique hash, preventing reprocessing of the same listing.
+* **Duplicate Prevention:** A pipeline drops ads whose `uid` (OLX `listId`) is already stored, keeping one row per listing (snapshot model).
 * **Data Normalization:** Employs `ItemLoaders` and custom processors in `items.py` to clean, parse, and structure the extracted data before storage.
 * **Structured Database:** Defines a clear database schema in `models.py` to store catalog and ad information across multiple related tables.
 * **Dynamic URL Handling:** The `AdSpider` can be run with a specific start URL or, if none is provided, it will automatically fetch unscraped URLs from the database.
