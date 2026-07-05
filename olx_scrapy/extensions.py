@@ -17,11 +17,11 @@ _NON_GEO_SEGMENTS = frozenset({
 
 
 class CatalogEncounterExporter:
-    """Writes delta catalog items to a partitioned .jsonl.gz and a run manifest.
+    """Writes new-listing catalog items to a partitioned .jsonl.gz and a run manifest.
 
-    Only items that pass ChangeDetectionCatalogPipeline (new or changed
-    fingerprint) are written to the .jsonl.gz. Unchanged items caught by
-    DropItem are counted in the manifest only.
+    Only items that pass DuplicatesCatalogPipeline (a first-seen uid) are written
+    to the .jsonl.gz. Already-seen uids caught by DropItem are counted in the
+    manifest only.
 
     Output layout:
         runs/spider=catalog/dt=YYYY-MM-DD/region=<slug>/<run-id>.jsonl.gz
@@ -34,8 +34,7 @@ class CatalogEncounterExporter:
     def __init__(self):
         self._file = None
         self._new_items = 0
-        self._changed_items = 0
-        self._unchanged_items = 0
+        self._duplicate_items = 0
         self._start_time = None
         self._run_id = None
         self._region = None
@@ -87,18 +86,14 @@ class CatalogEncounterExporter:
         if spider.name != 'olx_catalog' or self._file is None:
             return
 
-        if item.get('_is_new_version'):
-            self._new_items += 1
-        else:
-            self._changed_items += 1
-
-        record = {k: v for k, v in item.items() if k != '_is_new_version'}
-        self._file.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
+        # Dedup drops already-seen uids, so every scraped item is a new listing.
+        self._new_items += 1
+        self._file.write(json.dumps(dict(item), ensure_ascii=False, default=str) + '\n')
 
     def item_dropped(self, item, response, spider, exception):
         if spider.name != 'olx_catalog':
             return
-        self._unchanged_items += 1
+        self._duplicate_items += 1
 
     def spider_closed(self, spider, reason):
         if spider.name != 'olx_catalog' or self._file is None:
@@ -108,7 +103,7 @@ class CatalogEncounterExporter:
         self._file = None
 
         duration_s = round((datetime.now() - self._start_time).total_seconds(), 1)
-        total_seen = self._new_items + self._changed_items + self._unchanged_items
+        total_seen = self._new_items + self._duplicate_items
 
         manifest = {
             'run_id': self._run_id,
@@ -116,8 +111,7 @@ class CatalogEncounterExporter:
             'dt': self._dt,
             'total_seen': total_seen,
             'new_items': self._new_items,
-            'changed_items': self._changed_items,
-            'unchanged_items': self._unchanged_items,
+            'duplicate_items': self._duplicate_items,
             'duration_s': duration_s,
         }
 

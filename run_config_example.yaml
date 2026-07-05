@@ -1,7 +1,7 @@
 # Configuration for the OLX scraper run script
 
 # Set the mode for the scraper.
-# Options: 'CATALOG' or 'AD'
+# Options: 'CATALOG', 'AD', or 'WARM' (warm the Playwright profile past Cloudflare).
 mode: 'CATALOG'
 
 # Settings for the Catalog Spider

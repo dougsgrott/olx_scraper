@@ -30,7 +30,11 @@ DOWNLOADER_MIDDLEWARES = {
 
 
 # Configure maximum concurrent requests performed by Scrapy (default: 16)
-CONCURRENT_REQUESTS = 2
+# Keep at 1: the persistent Playwright profile (.playwright_profile) can only be
+# held by one browser at a time. Parallel requests race on the profile's
+# SingletonLock and can drop a request onto an untrusted throwaway context ->
+# instant Cloudflare 403. One-at-a-time is also a smaller anti-bot footprint.
+CONCURRENT_REQUESTS = 1
 
 # Configure a delay for requests for the same website (default: 0)
 # See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay
@@ -98,8 +102,14 @@ CONNECTION_STRING = 'sqlite:///' + os.path.join(file_path, os.path.join('scraped
 #HTTPCACHE_IGNORE_HTTP_CODES = []
 #HTTPCACHE_STORAGE = 'scrapy.extensions.httpcache.FilesystemCacheStorage'
 
+# https ONLY. Scrapy instantiates one download handler per scheme; mapping both
+# http and https here creates TWO ScrapyPlaywrightDownloadHandler instances that
+# race each other at engine start to launch_persistent_context() on the same
+# .playwright_profile. The loser hits SingletonLock, and scrapy-playwright then
+# silently rebuilds its 'default' context with empty kwargs (no user_data_dir)
+# -> throwaway browser -> Cloudflare 403. All OLX URLs are https, so the http
+# entry provided nothing but the race.
 DOWNLOAD_HANDLERS = {
-    "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
     "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
 }
 

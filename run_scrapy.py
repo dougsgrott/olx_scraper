@@ -17,6 +17,8 @@ sys.modules["playwright._impl"] = patchright._impl
 sys.modules["playwright._impl._errors"] = patchright._impl._errors
 
 import os
+import subprocess
+import time
 import traceback
 import yaml
 from scrapy.crawler import CrawlerRunner
@@ -36,6 +38,69 @@ def read_config(file_path="run_config.yaml"):
     return None
 
 
+def _clear_profile_lock():
+    """Free the persistent Playwright profile before launching a browser.
+
+    Chromium enforces single-instance access to a user-data-dir via a
+    `SingletonLock`. scrapy-playwright routinely leaves an orphaned chromium
+    alive after a run; if it is still holding the profile when the next run
+    launches, launch_persistent_context fails with 'SingletonLock: File exists',
+    silently falls back to an unauthenticated throwaway context, and gets a
+    Cloudflare 403.
+
+    Match on the distinctive profile dir name (`.playwright_profile` only ever
+    appears in a chromium `--user-data-dir=` for this project, not in run.py's
+    own argv), SIGKILL it, wait until it is actually gone, then drop stale locks.
+    """
+    profile = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.playwright_profile')
+    pattern = '.playwright_profile'
+
+    def _still_running():
+        try:
+            return subprocess.run(
+                ['pgrep', '-f', pattern], stdout=subprocess.DEVNULL
+            ).returncode == 0
+        except FileNotFoundError:
+            return False
+
+    if _still_running():
+        print("A browser is still holding the Playwright profile; killing it.")
+        try:
+            subprocess.run(['pkill', '-9', '-f', pattern])
+        except FileNotFoundError:
+            pass
+        for _ in range(15):
+            time.sleep(0.3)
+            if not _still_running():
+                break
+
+    for name in ('SingletonLock', 'SingletonCookie', 'SingletonSocket'):
+        path = os.path.join(profile, name)
+        try:
+            if os.path.islink(path) or os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            pass
+
+
+def _warm_profile(config):
+    """Launch the interactive profile warm-up (scripts/warm_profile.py) in a
+    clean subprocess, so its sync Playwright driver doesn't collide with the
+    Twisted asyncio reactor this module installs. Warms the catalog spider's
+    first start_url unless `warm.url` overrides it in run_config.yaml."""
+    warm_cfg = config.get('warm') or {}
+    url = warm_cfg.get('url')
+    if not url:
+        urls = (config.get('catalog_spider') or {}).get('start_urls') or []
+        url = urls[0] if urls else None
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    script = os.path.join(here, 'scripts', 'warm_profile.py')
+    cmd = [sys.executable, script] + ([url] if url else [])
+    print(f"--- Warming profile{f' at {url}' if url else ''} ---")
+    subprocess.run(cmd, check=False)
+
+
 def run_scraper():
     config = read_config()
     if not config:
@@ -44,7 +109,13 @@ def run_scraper():
 
     mode = config.get('mode')
     if not mode:
-        print("Error: 'mode' not specified in run_config.yaml. Should be 'CATALOG' or 'AD'.")
+        print("Error: 'mode' not specified in run_config.yaml. Should be 'CATALOG', 'AD', or 'WARM'.")
+        return
+
+    _clear_profile_lock()
+
+    if mode == 'WARM':
+        _warm_profile(config)
         return
 
     os.makedirs('logs', exist_ok=True)
@@ -62,7 +133,7 @@ def run_scraper():
     def crawl():
         try:
             if mode == 'CATALOG':
-                from olx_scraper.spiders.catalog_spider import CatalogSpider
+                from olx_scrapy.spiders.catalog_spider import CatalogSpider
                 catalog_config = config.get('catalog_spider', {})
                 start_urls = catalog_config.get('start_urls', [])
 
@@ -75,7 +146,7 @@ def run_scraper():
                 yield runner.crawl(CatalogSpider, start_urls=','.join(start_urls))
 
             elif mode == 'AD':
-                from olx_scraper.spiders.ad_spider import AdSpider
+                from olx_scrapy.spiders.ad_spider import AdSpider
                 ad_config = config.get('ad_spider', {})
                 source = ad_config.get('source', 'database')
 
@@ -95,7 +166,7 @@ def run_scraper():
                     print(f"Error: Invalid 'source' for AD mode: '{source}'. Must be 'urls' or 'database'.")
                     return
             else:
-                print(f"Error: Invalid mode '{mode}' in config. Must be 'CATALOG' or 'AD'.")
+                print(f"Error: Invalid mode '{mode}' in config. Must be 'CATALOG', 'AD', or 'WARM'.")
                 return
         except Exception:
             print("--- Crawl failed with an exception ---")
