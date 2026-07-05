@@ -1,4 +1,3 @@
-import hashlib
 import json
 from datetime import datetime
 
@@ -33,46 +32,20 @@ class BaseSavePipeline:
                 raise
 
 
-class ChangeDetectionCatalogPipeline(BaseSavePipeline):
-    """Compute a deterministic fingerprint over uid + watched fields. Drop the
-    item if the most recent prior row for the same uid has the same fingerprint;
-    otherwise let it through, tagged with the fingerprint, with url_is_scraped
-    inherited from the prior row so AdSpider doesn't re-fetch the detail page.
-
-    The fingerprint is also the join key between catalog and ad-detail rows
-    (see ADR 0002), so it has to be present on every saved row.
-    """
-    WATCHED = ('pricing', 'old_price', 'price_reduction_badge')
+class DuplicatesCatalogPipeline(BaseSavePipeline):
+    """Snapshot model (ADR 0006): one row per uid. Drop the item if its uid is
+    already stored; otherwise let it through to be saved. No versioning, no
+    fingerprint -- uid is the sole key."""
 
     def process_item(self, item, spider=None):
-        fp = self._fingerprint(item)
-        item['watched_state_fingerprint'] = fp
-
         with self.factory() as session:
-            prior = (session.query(CatalogDataModel)
-                     .filter_by(uid=item['uid'])
-                     .order_by(CatalogDataModel.id.desc())
-                     .first())
+            exists = (session.query(CatalogDataModel)
+                      .filter_by(uid=item['uid'])
+                      .first())
 
-        if prior is None:
-            item['_is_new_version'] = True
-            return item
-
-        if prior.watched_state_fingerprint == fp:
-            raise DropItem(f"Unchanged ad: {item['uid']}")
-
-        item['url_is_scraped'] = prior.url_is_scraped
-        item['url_scraped_date'] = prior.url_scraped_date
-        item['_is_new_version'] = False
+        if exists is not None:
+            raise DropItem(f"Duplicate uid: {item['uid']}")
         return item
-
-    @classmethod
-    def _fingerprint(cls, item):
-        payload = json.dumps({
-            'uid': item.get('uid'),
-            'watched': {f: item.get(f) for f in cls.WATCHED},
-        }, sort_keys=True, ensure_ascii=False)
-        return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 
 class SaveCatalogDataPipeline(BaseSavePipeline):

@@ -39,9 +39,6 @@ class CatalogItem(scrapy.Item):
     price_reduction_badge = scrapy.Field()
     has_real_estate_highlight = scrapy.Field()
 
-    watched_state_fingerprint = scrapy.Field()
-    _is_new_version = scrapy.Field()
-
 
 class AdItem(scrapy.Item):
     title = scrapy.Field()
@@ -78,5 +75,3 @@ class AdItem(scrapy.Item):
     zone = scrapy.Field()
     zone_id = scrapy.Field()
     region = scrapy.Field()
-
-    watched_state_fingerprint = scrapy.Field()

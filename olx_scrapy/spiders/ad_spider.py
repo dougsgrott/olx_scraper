@@ -50,7 +50,6 @@ class AdSpider(Spider):
                     meta={
                         'playwright': True,
                         'playwright_page_goto_kwargs': {'wait_until': 'domcontentloaded'},
-                        'watched_state_fingerprint': row.watched_state_fingerprint,
                     },
                 )
 
@@ -123,10 +122,6 @@ class AdSpider(Spider):
         item['zone']             = loc.get('zone')
         item['zone_id']          = loc.get('zoneId')
         item['region']           = loc.get('region')
-
-        # Carries the catalog version's fingerprint forward (None when the ad
-        # was scraped via the `source: 'urls'` flow, which bypasses the catalog).
-        item['watched_state_fingerprint'] = response.meta.get('watched_state_fingerprint')
 
         return item
 

@@ -1,5 +1,6 @@
 import json
 import pprint
+import re
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
@@ -19,7 +20,7 @@ class CatalogSpider(Spider):
         'DOWNLOAD_DELAY': 3,
         'ROBOTSTXT_OBEY': False,
         'ITEM_PIPELINES': {
-           'olx_scraper.pipelines.ChangeDetectionCatalogPipeline': 100,
+           'olx_scraper.pipelines.DuplicatesCatalogPipeline': 100,
            'olx_scraper.pipelines.DefaultValuesCatalogPipeline': 110,
            'olx_scraper.pipelines.SaveCatalogDataPipeline': 200,
         },
@@ -90,12 +91,13 @@ class CatalogSpider(Spider):
         page_props = self._page_props(response)
 
         if page_props is None:
-            dump_path = f"logs/blocked_{response.status}.html"
+            dump_path = f"logs/no_ads_{response.status}.html"
             with open(dump_path, 'w', encoding='utf-8') as fh:
                 fh.write(response.text)
             self.logger.warning(
-                f"No __NEXT_DATA__ at {response.url} (HTTP {response.status}, "
-                f"{len(response.text)} chars). Saved served page to {dump_path}."
+                f"No ad payload at {response.url} (HTTP {response.status}, "
+                f"{len(response.text)} chars). Saved served page to {dump_path}. "
+                f"(status 403 => Cloudflare block; 200 => page structure changed.)"
             )
             return
 
@@ -105,14 +107,71 @@ class CatalogSpider(Spider):
         yield from self.paginate(response, page_props)
 
     def _page_props(self, response):
-        """Parse <script id='__NEXT_DATA__'> and return props.pageProps (or None)."""
-        raw = response.xpath('//script[@id="__NEXT_DATA__"]/text()').get()
-        if not raw:
+        """Return the search props (ads + pagination) or None.
+
+        OLX moved from Next.js Pages Router (a single `<script id="__NEXT_DATA__">`
+        blob) to the App Router, which streams the page as escaped JSON fragments
+        inside `self.__next_f.push([n, "..."])` calls. Reconstruct that payload and
+        pull out the object carrying the `ads` list; its shape (`ads`,
+        `totalOfAds`, `pageSize`, `pageIndex`, per-ad fields) matches the old
+        `pageProps`, so `_build_item` / `paginate` consume it unchanged.
+        """
+        payload = self._next_flight_payload(response)
+        if not payload:
             return None
-        try:
-            return json.loads(raw).get('props', {}).get('pageProps')
-        except (ValueError, TypeError):
-            return None
+        for m in re.finditer(r'\{"ads":', payload):
+            raw = self._balanced_object(payload, m.start())
+            if not raw:
+                continue
+            try:
+                obj = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(obj.get('ads'), list):
+                return obj
+        return None
+
+    @staticmethod
+    def _next_flight_payload(response):
+        """Concatenate every `self.__next_f.push([n, "<chunk>"])` string literal
+        (JSON-decoding each) into the full App Router flight payload."""
+        chunks = re.findall(
+            r'self\.__next_f\.push\(\[\d+,\s*("(?:[^"\\]|\\.)*")\s*\]\)',
+            response.text, re.S,
+        )
+        out = []
+        for c in chunks:
+            try:
+                out.append(json.loads(c))
+            except ValueError:
+                pass
+        return ''.join(out)
+
+    @staticmethod
+    def _balanced_object(s, start):
+        """Return the JSON object substring starting at `s[start] == '{'`, matching
+        braces while skipping string literals. None if unbalanced."""
+        depth = 0
+        in_str = False
+        esc = False
+        for j in range(start, len(s)):
+            c = s[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == '\\':
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            elif c == '"':
+                in_str = True
+            elif c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    return s[start:j + 1]
+        return None
 
     def _build_item(self, ad):
         loc = ad.get('locationDetails') or {}
@@ -124,8 +183,7 @@ class CatalogSpider(Spider):
         uid_code = '' if list_id is None else str(list_id)
 
         # listId is globally unique on OLX, so it doubles as both code and uid
-        # (ChangeDetectionCatalogPipeline keys off uid to detect price changes
-        # across snapshots).
+        # (DuplicatesCatalogPipeline keys off uid to drop already-seen listings).
         item['uid']   = uid_code
         item['code']  = uid_code
         item['title'] = ad.get('subject') or ad.get('title') or ''
