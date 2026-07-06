@@ -11,6 +11,16 @@ catalog_spider:
   start_urls:
     - "https://www.olx.com.br/imoveis/aluguel/estado-sc/florianopolis-e-regiao"
 
+  # Optional early stopping — omit the block to always paginate to the end.
+  # OLX keeps stale (already-rented) ads online, so incremental runs mostly
+  # re-encounter known uids; these rules cut pagination short once a run
+  # stops finding new listings. Works best with newest-first start URLs
+  # (add ?sf=t to sort by "Mais recentes").
+  # early_stop:
+  #   patience: 2           # stop after this many consecutive stale pages (0 = off)
+  #   min_new_per_page: 1   # a page is stale when it yields fewer new items than this
+  #   max_pages: 0          # hard cap on pages per start URL (0 = unlimited)
+
 # Settings for the Ad Spider
 ad_spider:
   # Defines where the spider gets its URLs.

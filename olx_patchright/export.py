@@ -42,6 +42,8 @@ class EncounterExporter:
         self._region = region
         self._new_items = 0
         self._duplicate_items = 0
+        self._pages_scraped = 0
+        self._stop_reasons = []
 
         data_dir = os.path.join(
             'runs', 'spider=catalog', f'dt={self._dt}', f'region={self._region}'
@@ -65,6 +67,12 @@ class EncounterExporter:
     def count_duplicate(self):
         self._duplicate_items += 1
 
+    def record_stop(self, pages_scraped, stop_reason):
+        """Per start URL: how many pages were fetched and why pagination ended
+        ('exhausted', 'early_stop', 'max_pages', or 'no_payload')."""
+        self._pages_scraped += pages_scraped
+        self._stop_reasons.append(stop_reason)
+
     def close(self):
         """Close the .jsonl.gz, write the manifest, and return it as a dict."""
         self._file.close()
@@ -77,6 +85,8 @@ class EncounterExporter:
             'total_seen': self._new_items + self._duplicate_items,
             'new_items': self._new_items,
             'duplicate_items': self._duplicate_items,
+            'pages_scraped': self._pages_scraped,
+            'stop_reason': self._stop_reasons,
             'duration_s': duration_s,
         }
         with open(self._manifest_path, 'w', encoding='utf-8') as f:

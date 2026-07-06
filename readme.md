@@ -38,7 +38,8 @@ Ads are not tracked over time — no price history, no "still online" checks.
 │   ├── silver/           # silver INSERT template (read by scripts/pipeline.py)
 │   └── gold/             # gold rebuild INSERT (read by scripts/pipeline.py)
 │
-├── runs/                 # local bronze staging (gitignored) — spider=catalog/dt=.../region=.../*.jsonl.gz
+├── runs/                 # bronze outbox (gitignored) — spider=catalog/dt=.../region=.../*.jsonl.gz
+├── runs_uploaded/        # uploaded-runs archive (gitignored) — pipeline.py upload moves files here
 ├── scraped_data/         # SQLite database (olx.sqlite)
 └── docs/                 # ADRs, runbooks, glossary (docs/CONTEXT.md)
 ```
@@ -99,6 +100,8 @@ manifest:
   "total_seen": 5,
   "new_items": 5,
   "duplicate_items": 0,
+  "pages_scraped": 1,
+  "stop_reason": ["exhausted"],
   "duration_s": 7.3
 }
 ```
@@ -107,6 +110,34 @@ manifest:
 and written to `runs/spider=catalog/dt=<dt>/region=<slug>/<run_id>.jsonl.gz`
 (bronze staging for the cloud pipeline below). Already-seen `uid`s are dropped
 — re-running the same URL is always safe.
+
+### Early stopping
+
+OLX is an open marketplace — stale ads (already-rented units) stay online
+indefinitely, so on repeat runs most of a region's pages are ads you've already
+seen. Since duplicates carry no information under the snapshot model, an
+optional `early_stop` block cuts pagination short:
+
+```yaml
+catalog_spider:
+  start_urls: [ ... ]
+  early_stop:
+    patience: 2           # stop after this many consecutive stale pages (0 = off)
+    min_new_per_page: 1   # a page is stale when it yields fewer new items than this
+    max_pages: 0          # hard cap on pages per start URL (0 = unlimited)
+```
+
+The patience rule and the hard cap are independent; omit the block (or set a
+knob to 0) to disable. The stale-page counter resets whenever a page yields
+enough new items, so featured/pinned ads reshuffled into every page don't
+trigger false stops. Why the run ended is recorded per start URL in the
+manifest's `stop_reason` (`exhausted`, `early_stop`, `max_pages`, or
+`no_payload`).
+
+Early stopping works best with newest-first results — append `?sf=t` to a
+start URL (OLX's "Mais recentes" sort, verified) so new ads front-load and
+the first stale page really means the rest is old. Under the default
+relevance ordering, prefer a higher `patience`.
 
 ### Legacy Scrapy path
 
@@ -132,13 +163,17 @@ Athena-queryable layers with `scripts/pipeline.py` — see
 for the full runbook (layer model, gotchas, verification queries).
 
 ```bash
-uv run python scripts/pipeline.py upload                 # bronze: runs/ -> s3://.../raw/
-uv run python scripts/pipeline.py silver --dt 2026-07-05  # rebuild one day of silver
-uv run python scripts/pipeline.py gold                    # full-rebuild gold (fact_listings)
-uv run python scripts/pipeline.py verify                  # smoke query + typing + grain checks
+uv run python scripts/pipeline.py upload   # bronze: runs/ outbox -> s3://.../raw/, then archive
+uv run python scripts/pipeline.py silver   # rebuild newest local dt (or: --dt 2026-07-05)
+uv run python scripts/pipeline.py gold     # full-rebuild gold (fact_listings)
+uv run python scripts/pipeline.py verify   # smoke query + typing + grain checks
 ```
 
-`--dry-run` on any command prints what would happen without touching AWS.
+`runs/` is an **outbox**: `upload` moves each shipped file to `runs_uploaded/`
+(same tree), so re-running uploads nothing twice and `runs/` never grows.
+`silver` derives `--dt` from the newest local manifest when omitted — pass it
+explicitly only for backfills. `--dry-run` on any command prints what would
+happen without touching AWS.
 
 ---
 
