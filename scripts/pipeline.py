@@ -4,9 +4,14 @@ Replaces the manual runbook steps (aws s3 cp / console-pasted SQL) with one
 command per stage:
 
     uv run python scripts/pipeline.py upload                      # bronze: runs/ -> s3://.../raw/
-    uv run python scripts/pipeline.py silver --dt 2026-07-05      # rebuild one dt of silver
+    uv run python scripts/pipeline.py silver [--dt 2026-07-05]    # rebuild one dt of silver
     uv run python scripts/pipeline.py gold                        # full-rebuild gold
     uv run python scripts/pipeline.py verify                      # health checks
+
+runs/ is an outbox: upload moves each successfully uploaded file to a mirror
+tree in runs_uploaded/ (the bucket is versioned, so re-uploading identical
+files would pile up stored versions). silver without --dt uses the newest dt
+found in the local manifest trees (runs/ then runs_uploaded/).
 
 The transform SQL lives in infra/silver/ and infra/gold/ (pure SQL, no
 comments); this script only fills the __DT__/__REGION__ tokens and drives
@@ -46,6 +51,26 @@ def _bucket(args, session):
         return args.bucket
     account = session.client('sts').get_caller_identity()['Account']
     return f'olx-data-{account}'
+
+
+def _archive_dir(args):
+    if getattr(args, 'archive_dir', None):
+        return Path(args.archive_dir)
+    return Path(args.runs_dir.rstrip('/') + '_uploaded')
+
+
+def _manifest_dt_dirs(args):
+    """Yield local dt= partition dirs from both the outbox and the archive."""
+    for root in (Path(args.runs_dir), _archive_dir(args)):
+        base = root / 'manifests' / 'spider=catalog'
+        if base.is_dir():
+            yield from (p for p in base.iterdir()
+                        if p.is_dir() and p.name.startswith('dt='))
+
+
+def _latest_local_dt(args):
+    dts = {p.name.split('=', 1)[1] for p in _manifest_dt_dirs(args)}
+    return max(dts) if dts else None
 
 
 # --------------------------------------------------------------- athena ----
@@ -127,31 +152,56 @@ def delete_prefix(session, bucket, prefix, dry_run, assume_yes):
 
 # --------------------------------------------------------------- upload ----
 
+def _prune_empty_dirs(root):
+    for d in sorted((p for p in root.rglob('*') if p.is_dir()), reverse=True):
+        try:
+            d.rmdir()
+        except OSError:
+            pass
+
+
 def cmd_upload(args):
     session = _session(args)
     bucket = _bucket(args, session)
     s3 = session.client('s3')
 
     runs_dir = Path(args.runs_dir)
-    if not runs_dir.is_dir():
-        sys.exit(f"No runs directory at {runs_dir}")
+    archive_dir = _archive_dir(args)
 
     files = sorted(
         p for p in runs_dir.rglob('*')
         if p.is_file() and p.suffix != '.tmp'
-    )
+    ) if runs_dir.is_dir() else []
     if not files:
-        sys.exit(f"Nothing to upload under {runs_dir}")
+        # An empty outbox is a normal state (e.g. a nightly run that scraped
+        # nothing new), not an error a wrapper should alarm on.
+        print(f"Nothing to upload under {runs_dir}/ (outbox empty).")
+        return
 
     print(f"Uploading {len(files)} file(s) from {runs_dir}/ to s3://{bucket}/raw/")
+    dts = set()
     for path in files:
-        key = f"raw/{path.relative_to(runs_dir).as_posix()}"
+        rel = path.relative_to(runs_dir)
+        key = f"raw/{rel.as_posix()}"
         if args.dry_run:
             print(f"  (dry-run) {path} -> {key}")
             continue
         s3.upload_file(str(path), bucket, key)
         print(f"  {key}")
-    print("Upload complete." if not args.dry_run else "Dry run complete.")
+        dts.update(part.split('=', 1)[1] for part in rel.parts
+                   if part.startswith('dt='))
+        if not args.no_archive:
+            dest = archive_dir / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            path.rename(dest)
+
+    if args.dry_run:
+        print("Dry run complete.")
+        return
+    if not args.no_archive:
+        _prune_empty_dirs(runs_dir)
+        print(f"Archived uploaded file(s) to {archive_dir}/")
+    print(f"Upload complete. dt(s) uploaded: {', '.join(sorted(dts))}")
 
 
 # --------------------------------------------------------------- silver ----
@@ -160,14 +210,15 @@ def _regions_for_dt(args, session, bucket):
     if args.region_slug:
         return args.region_slug
 
-    manifest_dir = Path(args.runs_dir) / 'manifests' / 'spider=catalog' / f'dt={args.dt}'
-    if manifest_dir.is_dir():
-        regions = sorted(
-            p.name.split('=', 1)[1] for p in manifest_dir.iterdir()
-            if p.is_dir() and p.name.startswith('region=')
-        )
-        if regions:
-            return regions
+    regions = set()
+    for dt_dir in _manifest_dt_dirs(args):
+        if dt_dir.name == f'dt={args.dt}':
+            regions.update(
+                p.name.split('=', 1)[1] for p in dt_dir.iterdir()
+                if p.is_dir() and p.name.startswith('region=')
+            )
+    if regions:
+        return sorted(regions)
 
     # No local manifests for this dt (e.g. different machine): list the raw
     # partition on S3 instead. olx-pipeline has ListBucket.
@@ -184,6 +235,16 @@ def _regions_for_dt(args, session, bucket):
 
 
 def cmd_silver(args):
+    if not args.dt:
+        args.dt = _latest_local_dt(args)
+        if not args.dt:
+            sys.exit(
+                "No --dt given and no local manifests to derive it from "
+                f"(looked under {args.runs_dir}/ and {_archive_dir(args)}/). "
+                "Pass --dt YYYY-MM-DD explicitly."
+            )
+        print(f"--dt not given; using newest local dt={args.dt}")
+
     session = _session(args)
     bucket = _bucket(args, session)
     regions = _regions_for_dt(args, session, bucket)
@@ -282,17 +343,26 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = parser.add_subparsers(dest='command', required=True)
 
-    p = sub.add_parser('upload', help='Upload local runs/ tree to s3://<bucket>/raw/')
+    p = sub.add_parser('upload', help='Upload the runs/ outbox to s3://<bucket>/raw/, '
+                                      'then archive uploaded files to runs_uploaded/')
     _add_common(p, 'olx-scraper')
     p.add_argument('--runs-dir', default='runs', help='Local runs directory (default: runs)')
+    p.add_argument('--archive-dir', default=None,
+                   help='Where uploaded files are moved (default: <runs-dir>_uploaded)')
+    p.add_argument('--no-archive', action='store_true',
+                   help='Leave uploaded files in place (old re-upload-everything behavior)')
     p.set_defaults(func=cmd_upload)
 
     p = sub.add_parser('silver', help='Rebuild one dt partition of silver_catalog_events')
     _add_common(p, 'olx-pipeline')
-    p.add_argument('--dt', required=True, help='Partition date, YYYY-MM-DD')
+    p.add_argument('--dt', default=None,
+                   help='Partition date, YYYY-MM-DD (default: newest dt in local manifests)')
     p.add_argument('--region-slug', action='append', metavar='SLUG',
                    help='Region slug (repeatable; default: derive from manifests, then S3)')
     p.add_argument('--runs-dir', default='runs', help='Local runs directory (default: runs)')
+    p.add_argument('--archive-dir', default=None,
+                   help='Uploaded-files archive to also scan for manifests '
+                        '(default: <runs-dir>_uploaded)')
     p.add_argument('--yes', action='store_true', help='Skip the delete confirmation prompt')
     p.set_defaults(func=cmd_silver)
 

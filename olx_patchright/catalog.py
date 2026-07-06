@@ -2,7 +2,8 @@
 
 For each start URL: navigate, wait for the App Router flight payload to carry
 the ads list, map ads to records, keep first-seen uids (SQLite insert + bronze
-export), follow ?o=N pagination until the last page.
+export), follow ?o=N pagination until the last page — or until an optional
+early-stop rule fires (consecutive stale pages, or a hard page cap).
 """
 import os
 import time
@@ -17,7 +18,7 @@ from .parse import page_props, build_record, next_page_url
 
 NAV_TIMEOUT_MS = 30000
 # Politeness delay between page navigations (was DOWNLOAD_DELAY = 3).
-PAGE_DELAY_S = 3
+PAGE_DELAY_S = 6
 # The flight payload streams in after domcontentloaded; poll the DOM for the
 # ads object instead of waiting for the unreliable `load` event (OLX's
 # ad-heavy pages routinely stall it past the navigation timeout).
@@ -43,10 +44,11 @@ def _dump_page(page, status):
     return dump_path
 
 
-def scrape_catalog(start_urls):
+def scrape_catalog(start_urls, early_stop=None):
     clear_profile_lock()
     factory = session_factory()
     exporter = EncounterExporter(region=infer_region(start_urls[0]))
+    stop_cfg = _normalize_early_stop(early_stop)
 
     try:
         with sync_playwright() as p:
@@ -55,7 +57,10 @@ def scrape_catalog(start_urls):
             page = first_page(ctx)
             try:
                 for start_url in start_urls:
-                    _scrape_from(page, start_url, factory, exporter)
+                    pages, reason = _scrape_from(
+                        page, start_url, factory, exporter, stop_cfg
+                    )
+                    exporter.record_stop(pages, reason)
             finally:
                 ctx.close()
     finally:
@@ -64,10 +69,27 @@ def scrape_catalog(start_urls):
     return manifest
 
 
-def _scrape_from(page, start_url, factory, exporter):
+def _normalize_early_stop(early_stop):
+    """Clamp config to non-negative ints; 0 disables the corresponding rule.
+    patience=0 (or a missing block) disables the stale-page rule; max_pages=0
+    disables the hard cap — so the default is the old paginate-to-the-end
+    behavior."""
+    cfg = early_stop or {}
+    return {
+        'patience': max(0, int(cfg.get('patience') or 0)),
+        'min_new_per_page': max(1, int(cfg.get('min_new_per_page') or 1)),
+        'max_pages': max(0, int(cfg.get('max_pages') or 0)),
+    }
+
+
+def _scrape_from(page, start_url, factory, exporter, stop_cfg):
+    """Paginate from start_url; return (pages_scraped, stop_reason) where
+    stop_reason is 'exhausted', 'early_stop', 'max_pages', or 'no_payload'."""
     url = start_url
-    page_no = 1
+    page_no = 0
+    stale_pages = 0
     while url:
+        page_no += 1
         response = page.goto(url, wait_until='domcontentloaded')
         status = response.status if response else 0
         props = _wait_for_props(page)
@@ -79,7 +101,7 @@ def _scrape_from(page, start_url, factory, exporter):
                 f"{dump_path}. (403 => Cloudflare block, try WARM mode; "
                 f"200 => page structure changed.)"
             )
-            return
+            return page_no, 'no_payload'
 
         new = dup = 0
         for ad in props.get('ads') or []:
@@ -99,7 +121,19 @@ def _scrape_from(page, start_url, factory, exporter):
 
         print(f"Page {page_no} ({url}): {new} new, {dup} already seen.")
 
+        if stop_cfg['patience']:
+            stale_pages = stale_pages + 1 if new < stop_cfg['min_new_per_page'] else 0
+            if stale_pages >= stop_cfg['patience']:
+                print(
+                    f"Early stop: {stale_pages} consecutive page(s) with fewer "
+                    f"than {stop_cfg['min_new_per_page']} new item(s)."
+                )
+                return page_no, 'early_stop'
+        if stop_cfg['max_pages'] and page_no >= stop_cfg['max_pages']:
+            print(f"Stopping: reached max_pages = {stop_cfg['max_pages']}.")
+            return page_no, 'max_pages'
+
         url = next_page_url(url, props)
-        page_no += 1
         if url:
             time.sleep(PAGE_DELAY_S)
+    return page_no, 'exhausted'

@@ -44,9 +44,13 @@ def main():
         if not isinstance(catalog_urls, list) or not catalog_urls:
             print("Error: 'catalog_spider.start_urls' (as a list) not found in run_config.yaml.")
             return
+        early_stop = (config.get('catalog_spider') or {}).get('early_stop')
+        if early_stop is not None and not isinstance(early_stop, dict):
+            print("Error: 'catalog_spider.early_stop' must be a mapping (patience / min_new_per_page / max_pages).")
+            return
         from olx_patchright.catalog import scrape_catalog
         print(f"--- Scraping catalogue: {len(catalog_urls)} start URL(s) ---")
-        manifest = scrape_catalog(catalog_urls)
+        manifest = scrape_catalog(catalog_urls, early_stop=early_stop)
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
 
     elif mode == 'AD':
