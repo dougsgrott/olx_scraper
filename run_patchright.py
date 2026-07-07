@@ -50,8 +50,8 @@ def main():
             return
         from olx_patchright.catalog import scrape_catalog
         print(f"--- Scraping catalogue: {len(catalog_urls)} start URL(s) ---")
-        manifest = scrape_catalog(catalog_urls, early_stop=early_stop)
-        print(json.dumps(manifest, ensure_ascii=False, indent=2))
+        manifests = scrape_catalog(catalog_urls, early_stop=early_stop)
+        print(json.dumps(manifests, ensure_ascii=False, indent=2))
 
     elif mode == 'AD':
         print("AD mode is not ported to the Scrapy-free scraper yet (catalogue first).")

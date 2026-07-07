@@ -232,6 +232,8 @@ logs/
 .claude/
 runs/
 runs_uploaded/
+exports/
+.vscode
 .playwright_profile.blocked/
 
 # Terraform: local state, provider cache, and account-specific variables

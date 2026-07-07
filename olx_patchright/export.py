@@ -33,7 +33,8 @@ def infer_region(url):
 
 class EncounterExporter:
     """Only first-seen uids are written to the .jsonl.gz (delta-only bronze);
-    already-seen uids are counted in the manifest only."""
+    already-seen uids are counted in the manifest only. One exporter per
+    start URL/region: a multi-region run produces one manifest each."""
 
     def __init__(self, region):
         self._start_time = datetime.now()
@@ -74,8 +75,12 @@ class EncounterExporter:
         self._stop_reasons.append(stop_reason)
 
     def close(self):
-        """Close the .jsonl.gz, write the manifest, and return it as a dict."""
+        """Close the .jsonl.gz, write the manifest, and return it as a dict.
+        An all-duplicates run yields no bronze rows — drop the empty .jsonl.gz
+        so it is never staged for upload (the manifest still records the run)."""
         self._file.close()
+        if self._new_items == 0:
+            os.remove(self._jsonl_path)
 
         duration_s = round((datetime.now() - self._start_time).total_seconds(), 1)
         manifest = {

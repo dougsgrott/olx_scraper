@@ -67,8 +67,9 @@ AWS commands (`scripts/pipeline.py`) need credentials for the `olx-scraper` and
 ```yaml
 mode: 'CATALOG'          # or 'WARM'
 catalog_spider:
-  start_urls:
-    - "https://www.olx.com.br/imoveis/aluguel/estado-es/norte-do-espirito-santo/vitoria/republica"
+  start_urls:            # multiple URLs are scraped sequentially, one browser
+    - "https://www.olx.com.br/imoveis/aluguel/estado-es/norte-do-espirito-santo/vitoria?sf=1"
+    - "https://www.olx.com.br/imoveis/aluguel/estado-es/norte-do-espirito-santo/vila-velha?sf=1"
 ```
 
 **First run (or whenever Cloudflare blocks you):** warm the persistent browser
@@ -89,21 +90,29 @@ uv run python run_patchright.py   # with mode: 'CATALOG'
 ```
 
 This is the **active, recommended** path (see [ADR 0001](docs/adr/0001-scraper-on-home-box-not-aws.md)
-for why scraping happens on the home box rather than AWS). It prints a run
-manifest:
+for why scraping happens on the home box rather than AWS). Start URLs are
+scraped **sequentially through one browser**, each getting its own bronze
+`region=` partition and its own manifest (region is inferred from each URL's
+path — any level works: state, region, city, neighbourhood). Note that
+`region` records **scrape provenance, not listing geography**: with
+overlapping scopes (a city URL plus its whole-state URL), a listing belongs
+to whichever scope saw it first — use the `municipality`/`uf` columns for
+geographic analysis. It prints the manifests as a list:
 
 ```json
-{
-  "run_id": "20260705T103412",
-  "region": "estado-es_norte-do-espirito-santo_vitoria_republica",
-  "dt": "2026-07-05",
-  "total_seen": 5,
-  "new_items": 5,
-  "duplicate_items": 0,
-  "pages_scraped": 1,
-  "stop_reason": ["exhausted"],
-  "duration_s": 7.3
-}
+[
+  {
+    "run_id": "20260706T220156",
+    "region": "estado-es_norte-do-espirito-santo_vitoria",
+    "dt": "2026-07-06",
+    "total_seen": 100,
+    "new_items": 25,
+    "duplicate_items": 75,
+    "pages_scraped": 2,
+    "stop_reason": ["early_stop"],
+    "duration_s": 9.2
+  }
+]
 ```
 
 `new_items` are appended to `scraped_data/olx.sqlite` (table `catalog_data`)
@@ -167,7 +176,22 @@ uv run python scripts/pipeline.py upload   # bronze: runs/ outbox -> s3://.../ra
 uv run python scripts/pipeline.py silver   # rebuild newest local dt (or: --dt 2026-07-05)
 uv run python scripts/pipeline.py gold     # full-rebuild gold (fact_listings)
 uv run python scripts/pipeline.py verify   # smoke query + typing + grain checks
+uv run python scripts/pipeline.py export   # silver+gold -> exports/ (parquet; --format csv)
 ```
+
+For EDA, `export` pulls both layers into `exports/` (gitignored):
+`pd.read_parquet("exports/fact_listings")` or, with `--format csv`,
+`pd.read_csv("exports/fact_listings.csv")`. Note: the parquet `DECIMAL`
+columns (`price_brl`, `size_m2`, `price_per_m2`, …) arrive as exact
+`Decimal` objects — cast with `.astype(float)` before numeric summaries.
+
+**Data characteristics** (2026-07-05 snapshot, 3,565 listings, 6 ES regions):
+`price_brl` is heavily right-skewed — min R$30, median R$2,804, mean R$18,790,
+max R$2,100,003 — and `fact_listings` is not filtered by listing type or price
+plausibility. Extreme values include atypical listings and likely data-entry
+errors. For aggregate statistics, filter first (e.g. by `real_estate_type` /
+`category_name` and a price range) or use robust measures (median, IQR).
+`price_brl` is NULL on a small fraction of rows (7 of 3,565 in this snapshot).
 
 `runs/` is an **outbox**: `upload` moves each shipped file to `runs_uploaded/`
 (same tree), so re-running uploads nothing twice and `runs/` never grows.
