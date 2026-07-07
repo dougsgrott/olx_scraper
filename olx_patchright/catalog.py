@@ -45,28 +45,35 @@ def _dump_page(page, status):
 
 
 def scrape_catalog(start_urls, early_stop=None):
+    """Scrape each start URL in turn through one shared browser tab.
+
+    Each start URL gets its own exporter (region inferred from its path), so a
+    multi-city run writes one bronze partition + manifest per region instead
+    of attributing everything to the first URL's region. Returns the list of
+    manifests, in start_urls order."""
     clear_profile_lock()
     factory = session_factory()
-    exporter = EncounterExporter(region=infer_region(start_urls[0]))
     stop_cfg = _normalize_early_stop(early_stop)
+    manifests = []
 
-    try:
-        with sync_playwright() as p:
-            ctx = launch_profile(p)
-            ctx.set_default_navigation_timeout(NAV_TIMEOUT_MS)
-            page = first_page(ctx)
-            try:
-                for start_url in start_urls:
+    with sync_playwright() as p:
+        ctx = launch_profile(p)
+        ctx.set_default_navigation_timeout(NAV_TIMEOUT_MS)
+        page = first_page(ctx)
+        try:
+            for start_url in start_urls:
+                exporter = EncounterExporter(region=infer_region(start_url))
+                try:
                     pages, reason = _scrape_from(
                         page, start_url, factory, exporter, stop_cfg
                     )
                     exporter.record_stop(pages, reason)
-            finally:
-                ctx.close()
-    finally:
-        manifest = exporter.close()
+                finally:
+                    manifests.append(exporter.close())
+        finally:
+            ctx.close()
 
-    return manifest
+    return manifests
 
 
 def _normalize_early_stop(early_stop):

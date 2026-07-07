@@ -7,6 +7,7 @@ command per stage:
     uv run python scripts/pipeline.py silver [--dt 2026-07-05]    # rebuild one dt of silver
     uv run python scripts/pipeline.py gold                        # full-rebuild gold
     uv run python scripts/pipeline.py verify                      # health checks
+    uv run python scripts/pipeline.py export                      # silver+gold -> exports/ for EDA
 
 runs/ is an outbox: upload moves each successfully uploaded file to a mirror
 tree in runs_uploaded/ (the bucket is versioned, so re-uploading identical
@@ -23,9 +24,11 @@ Profiles: upload runs as `olx-scraper` (write-only); transforms/verify run as
 `olx-pipeline` (least-privilege user managed in infra/terraform/iam.tf).
 """
 import argparse
+import shutil
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import boto3
 
@@ -281,6 +284,82 @@ def cmd_gold(args):
     print("Gold complete.")
 
 
+# --------------------------------------------------------------- export ----
+
+# layer -> (table name, S3 data prefix)
+EXPORT_LAYERS = {
+    'silver': ('silver_catalog_events', 'silver/catalog_events/'),
+    'gold': ('fact_listings', 'gold/fact_listings/'),
+}
+
+
+def _export_parquet(args, session, bucket, table, prefix, out_dir):
+    s3 = session.client('s3')
+    objs = []
+    for page in s3.get_paginator('list_objects_v2').paginate(Bucket=bucket, Prefix=prefix):
+        objs.extend((o['Key'], o['Size']) for o in page.get('Contents', []))
+    if not objs:
+        print(f"{table}: nothing under s3://{bucket}/{prefix}")
+        return
+
+    target = out_dir / table
+    total_kib = sum(size for _, size in objs) / 1024
+    print(f"{table}: {len(objs)} parquet file(s), {total_kib:.1f} KiB -> {target}/")
+    if args.dry_run:
+        for key, _ in objs[:10]:
+            print(f"  (dry-run) {key}")
+        if len(objs) > 10:
+            print(f"  (dry-run) ... and {len(objs) - 10} more")
+        return
+
+    # Rebuilds change parquet file names; stale files from a previous export
+    # would silently duplicate rows, so start from a clean table dir.
+    if target.exists():
+        shutil.rmtree(target)
+    for key, _ in objs:
+        dest = target / key[len(prefix):]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        s3.download_file(bucket, key, str(dest))
+        print(f"  {dest}")
+
+
+def _export_csv(args, session, bucket, table, out_dir):
+    dest = out_dir / f'{table}.csv'
+    if args.dry_run:
+        print(f"{table}: (dry-run) SELECT * FROM {args.database}.{table} -> {dest}")
+        return
+
+    exec_id = run_query(session, args.workgroup,
+                        f'SELECT * FROM {args.database}.{table}', f'export {table}')
+    # Athena already wrote the result as a quoted, headered CSV at the
+    # workgroup's output location — just download it.
+    execution = session.client('athena').get_query_execution(QueryExecutionId=exec_id)
+    result_uri = urlparse(
+        execution['QueryExecution']['ResultConfiguration']['OutputLocation'])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    session.client('s3').download_file(
+        result_uri.netloc, result_uri.path.lstrip('/'), str(dest))
+    print(f"  {dest}")
+
+
+def cmd_export(args):
+    session = _session(args)
+    bucket = _bucket(args, session)
+    layers = ['silver', 'gold'] if args.layer == 'both' else [args.layer]
+    out_dir = Path(args.out)
+
+    for layer in layers:
+        table, prefix = EXPORT_LAYERS[layer]
+        if args.format == 'parquet':
+            _export_parquet(args, session, bucket, table, prefix, out_dir)
+        else:
+            _export_csv(args, session, bucket, table, out_dir)
+
+    if not args.dry_run:
+        print("Export complete. EDA hints: pandas.read_parquet"
+              f"('{out_dir}/<table>') or pandas.read_csv('{out_dir}/<table>.csv').")
+
+
 # --------------------------------------------------------------- verify ----
 
 def cmd_verify(args):
@@ -374,6 +453,18 @@ def main():
     p = sub.add_parser('verify', help='Smoke query + silver typing + gold grain checks')
     _add_common(p, 'olx-pipeline')
     p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser('export', help='Download silver/gold locally for EDA '
+                                      '(parquet: exact S3 files; csv: via Athena)')
+    _add_common(p, 'olx-pipeline')
+    p.add_argument('--layer', choices=['silver', 'gold', 'both'], default='both',
+                   help='Which layer(s) to export (default: both)')
+    p.add_argument('--format', choices=['parquet', 'csv'], default='parquet',
+                   help='parquet: download the table files as-is (hive dt dirs kept); '
+                        'csv: one flat file per table via an Athena SELECT * (default: parquet)')
+    p.add_argument('--out', default='exports',
+                   help='Local output directory (default: exports)')
+    p.set_defaults(func=cmd_export)
 
     args = parser.parse_args()
     args.func(args)
