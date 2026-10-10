@@ -18,6 +18,12 @@ UNSCOPED children are skipped (their URLs serve the parent's result anyway).
 Unprobed children of a split node are skipped with a warning — the remainder
 covers their content.
 
+Alias twins — one place listed under two parents with identical counts, e.g.
+.../centro/aclimacao and .../zona-sul/aclimacao — are emitted once (the first
+reached), since the second URL would only re-read duplicates;
+--keep-aliases emits both. The planning rules live in olx_patchright/plan.py,
+shared with the prober and the control panel.
+
 The --threshold does not need to match the probe run's: counts are stored, so
 re-generating with a different threshold (e.g. after measure_page_cap.py
 finds the real ceiling) requires no new probing.
@@ -35,63 +41,27 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-BASE = 'https://www.olx.com.br'
-# Sentinels written by scripts/probe_density.py (see LocationRow docstring).
-PADDED = -1
-UNSCOPED = -2
-PAGE_SIZE = 50
-
-
-def build_plan(rows, roots, threshold):
-    """Return (plan, warnings): plan is a list of (path, count, kind) in
-    scrape order (children before their remainder parent)."""
-    by_path = {r.path: r for r in rows}
-    kids_of = defaultdict(list)
-    for r in rows:
-        if r.parent_path:
-            kids_of[r.parent_path].append(r)
-
-    plan = []
-    warnings = []
-
-    def emit(node):
-        count = node.total_of_ads
-        if node.probed_at is None or count is None:
-            warnings.append(f'{node.path}: unprobed, skipped')
-            return
-        if count in (PADDED, UNSCOPED):
-            return
-        if count <= threshold:
-            plan.append((node.path, count, 'leaf'))
-            return
-        usable = [k for k in kids_of[node.path]
-                  if k.probed_at is not None and k.total_of_ads is not None
-                  and k.total_of_ads >= 0]
-        if not usable:
-            plan.append((node.path, count, 'dense'))
-            return
-        for kid in sorted(kids_of[node.path], key=lambda k: k.path):
-            emit(kid)
-        plan.append((node.path, count, 'remainder'))
-
-    for root in roots:
-        emit(by_path[root])
-    return plan, warnings
+from olx_patchright.plan import (  # noqa: E402
+    DEFAULT_SCOPE, DEFAULT_THRESHOLD, PAGE_SIZE, build_plan, find_aliases,
+    start_url,
+)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('paths', nargs='*', metavar='path',
                         help='subtree roots (default: all states)')
-    parser.add_argument('--scope', default='imoveis/aluguel',
+    parser.add_argument('--scope', default=DEFAULT_SCOPE,
                         help='category scope (default: %(default)s); must '
                              'match the scope the densities were probed under')
-    parser.add_argument('--threshold', type=int, default=5000,
+    parser.add_argument('--threshold', type=int, default=DEFAULT_THRESHOLD,
                         help='max ads a single scope may hold '
                              '(default: %(default)s)')
     parser.add_argument('--no-sf', action='store_true',
                         help="don't append ?sf=1 (newest-first, which "
                              'early-stop relies on)')
+    parser.add_argument('--keep-aliases', action='store_true',
+                        help='emit every alias twin, not just the first')
     parser.add_argument('--plain', action='store_true',
                         help='tab-separated url/count/kind instead of YAML')
     args = parser.parse_args()
@@ -109,11 +79,11 @@ def main():
     if unknown:
         parser.error(f'unknown location path(s): {", ".join(unknown)}')
 
-    plan, warnings = build_plan(rows, roots, args.threshold)
-    suffix = '' if args.no_sf else '?sf=1'
+    alias_of = None if args.keep_aliases else find_aliases(rows)
+    plan, warnings = build_plan(rows, roots, args.threshold, alias_of)
 
     def url(path):
-        return f'{BASE}/{scope}/{path}{suffix}'
+        return start_url(path, scope, newest_first=not args.no_sf)
 
     n = defaultdict(int)
     for _, _, kind in plan:

@@ -39,23 +39,21 @@ Do NOT run while a scrape is running (single-instance browser profile).
 """
 import argparse
 import os
-import re
 import sys
 import time
-import unicodedata
 from collections import deque
 from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-BASE = 'https://www.olx.com.br'
+# PADDED / UNSCOPED are the total_of_ads sentinels this prober writes (see the
+# module docstring); they and the status rules are shared through plan.py.
+from olx_patchright.plan import (  # noqa: E402
+    BASE, DEFAULT_SCOPE, DEFAULT_THRESHOLD, PADDED, UNSCOPED, classify_node,
+    norm,
+)
+
 PAGE_DELAY_S = 6  # same politeness delay as the catalog scraper
-# Sentinel stored in total_of_ads for scopes OLX pads with broader results
-# (zero-result fallback): genuinely scarce, but the served count is a lie.
-PADDED = -1
-# Sentinel for URLs whose location segment filters nothing (OLX serves an
-# ancestor's result); plan these branches at the deepest functional ancestor.
-UNSCOPED = -2
 # A probed count within this fraction of the parent's marks a near-parent
 # sibling; two of them under one parent are jointly impossible => UNSCOPED.
 NEAR_PARENT = 0.98
@@ -76,17 +74,10 @@ def children_of(factory, path):
                       .order_by(LocationRow.path).all()
 
 
-def _norm(value):
-    """Accent-folded kebab-case, the same shape as OLX slugs."""
-    value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore') \
-                       .decode()
-    return re.sub(r'[^a-z0-9]+', '-', value.lower()).strip('-')
-
-
 def _slug_names_place(slug):
     """Whether the slug names one municipality/neighbourhood that the served
     ads' own locationDetails can be checked against (aggregates cannot)."""
-    if slug == 'outras-cidades' or '-e-regiao' in slug:
+    if slug in ('outras-cidades', 'todas-as-cidades') or '-e-regiao' in slug:
         return False
     return not slug.startswith(('regiao-', 'zona-', 'grande-'))
 
@@ -98,7 +89,7 @@ def _content_scoped(props, slug):
     sampled = matched = 0
     for ad in (props.get('ads') or [])[:20]:
         loc = ad.get('locationDetails') or {}
-        names = [_norm(v) for v in (loc.get('municipality'),
+        names = [norm(v) for v in (loc.get('municipality'),
                                     loc.get('neighbourhood')) if v]
         if not names:
             continue
@@ -254,23 +245,25 @@ def report(factory, roots, threshold):
         total_nodes = session.query(LocationRow).count()
     prefixes = tuple(r.path for r in roots) if roots else None
     leaves = need_split = padded = unscoped = shown = 0
+    labels = {
+        'padded': 'padded (scarce, uncounted)',
+        'unscoped': 'UNSCOPED (URL filters nothing)',
+        'split': 'split',
+        'dense': 'NEEDS-SPLIT (no usable children)',
+        'leaf': 'leaf',
+    }
     for row in rows:
         if prefixes and not row.path.startswith(prefixes):
             continue
         shown += 1
-        if row.total_of_ads == PADDED:
-            status = 'padded (scarce, uncounted)'
-            padded += 1
-        elif row.total_of_ads == UNSCOPED:
-            status = 'UNSCOPED (URL filters nothing)'
-            unscoped += 1
-        elif row.total_of_ads > threshold:
-            has_kids = bool(children_of(factory, row.path))
-            status = 'split' if has_kids else 'NEEDS-SPLIT (no children)'
-            need_split += 0 if has_kids else 1
-        else:
-            status = 'leaf'
-            leaves += 1
+        kind = classify_node(row, children_of(factory, row.path)
+                             if row.total_of_ads > threshold else [],
+                             threshold)
+        status = labels[kind]
+        leaves += kind == 'leaf'
+        padded += kind == 'padded'
+        unscoped += kind == 'unscoped'
+        need_split += kind == 'dense'
         indent = '  ' * (row.depth - 1)
         print(f'{indent}{row.slug:40s} {row.total_of_ads:>8d}  {status}')
     print(f'\n{shown} probed of {total_nodes} nodes | {leaves} scrape leaves, '
@@ -283,10 +276,10 @@ def main():
     parser.add_argument('paths', nargs='*', metavar='path',
                         help='subtree root paths, e.g. estado-es '
                              '(default: all states)')
-    parser.add_argument('--scope', default='imoveis/aluguel',
+    parser.add_argument('--scope', default=DEFAULT_SCOPE,
                         help='category scope prefixed to each path '
                              '(default: %(default)s)')
-    parser.add_argument('--threshold', type=int, default=5000,
+    parser.add_argument('--threshold', type=int, default=DEFAULT_THRESHOLD,
                         help='descend into children above this count '
                              '(default: %(default)s ≈ 100 pages x 50 ads)')
     parser.add_argument('--limit', type=int, default=0,

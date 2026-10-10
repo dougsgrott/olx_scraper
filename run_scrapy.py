@@ -18,7 +18,6 @@ sys.modules["playwright._impl._errors"] = patchright._impl._errors
 
 import os
 import subprocess
-import time
 import traceback
 import yaml
 from scrapy.crawler import CrawlerRunner
@@ -39,7 +38,9 @@ def read_config(file_path="run_config.yaml"):
 
 
 def _clear_profile_lock():
-    """Free the persistent Playwright profile before launching a browser.
+    """Take the shared browser lock (exit 75 if another browser job runs) and
+    free the persistent Playwright profile before scrapy-playwright launches
+    it — see olx_patchright.browser.clear_profile_lock.
 
     Chromium enforces single-instance access to a user-data-dir via a
     `SingletonLock`. scrapy-playwright routinely leaves an orphaned chromium
@@ -47,40 +48,9 @@ def _clear_profile_lock():
     launches, launch_persistent_context fails with 'SingletonLock: File exists',
     silently falls back to an unauthenticated throwaway context, and gets a
     Cloudflare 403.
-
-    Match on the distinctive profile dir name (`.playwright_profile` only ever
-    appears in a chromium `--user-data-dir=` for this project, not in run.py's
-    own argv), SIGKILL it, wait until it is actually gone, then drop stale locks.
     """
-    profile = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.playwright_profile')
-    pattern = '.playwright_profile'
-
-    def _still_running():
-        try:
-            return subprocess.run(
-                ['pgrep', '-f', pattern], stdout=subprocess.DEVNULL
-            ).returncode == 0
-        except FileNotFoundError:
-            return False
-
-    if _still_running():
-        print("A browser is still holding the Playwright profile; killing it.")
-        try:
-            subprocess.run(['pkill', '-9', '-f', pattern])
-        except FileNotFoundError:
-            pass
-        for _ in range(15):
-            time.sleep(0.3)
-            if not _still_running():
-                break
-
-    for name in ('SingletonLock', 'SingletonCookie', 'SingletonSocket'):
-        path = os.path.join(profile, name)
-        try:
-            if os.path.islink(path) or os.path.exists(path):
-                os.remove(path)
-        except OSError:
-            pass
+    from olx_patchright.browser import clear_profile_lock
+    clear_profile_lock()
 
 
 def _warm_profile(config):
@@ -112,11 +82,12 @@ def run_scraper():
         print("Error: 'mode' not specified in run_config.yaml. Should be 'CATALOG', 'AD', or 'WARM'.")
         return
 
-    _clear_profile_lock()
-
     if mode == 'WARM':
+        # The warm-up subprocess takes the browser lock itself.
         _warm_profile(config)
         return
+
+    _clear_profile_lock()
 
     os.makedirs('logs', exist_ok=True)
 

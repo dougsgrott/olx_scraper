@@ -21,7 +21,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-BASE = 'https://www.olx.com.br'
+from olx_patchright.plan import BASE, DEFAULT_SCOPE, PAGE_SIZE  # noqa: E402
+
 PAGE_DELAY_S = 6
 # ~10.5k ads / 50 per page = 211 pages if uncapped; the sequence brackets the
 # historically suspected 100-page cap, then pushes upward.
@@ -44,7 +45,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('path', nargs='?', default=DEFAULT_PATH,
                         help=f'location path to walk (default: {DEFAULT_PATH})')
-    parser.add_argument('--scope', default='imoveis/aluguel')
+    parser.add_argument('--scope', default=DEFAULT_SCOPE)
     parser.add_argument('--pages', default=DEFAULT_PAGES,
                         help=f'ascending page numbers to try '
                              f'(default: {DEFAULT_PAGES})')
@@ -94,8 +95,8 @@ def main():
               'check the scope.')
     else:
         print(f'\nVerdict: last genuinely served page = {last_good} '
-              f'(~{last_good * 50} reachable ads per scope). '
-              f'Use that as probe_density/generator --threshold.')
+              f'(~{last_good * PAGE_SIZE} reachable ads per scope). '
+              f'Update plan.PAGE_CAP and the --threshold defaults.')
 
 
 if __name__ == '__main__':
