@@ -108,8 +108,8 @@ class EncounterExporter:
         """Keep OLX's own description of the scope from the first page: its
         live ad count, the listing it actually served (an unknown scope is
         served as a broader search at the same URL), the sort, and the
-        location breadcrumb (display names; the `region` level's value is the
-        DDD number)."""
+        location breadcrumb (display names, each with the scope URL it names;
+        the `region` level's value is the DDD number)."""
         if self._scope_meta:
             return
         filters = props.get('filters') or {}
@@ -118,7 +118,7 @@ class EncounterExporter:
             'listing_url': props.get('listingUrl'),
             'sort': filters.get('sort') if isinstance(filters, dict) else None,
             'breadcrumb': [
-                {k: loc.get(k) for k in ('level', 'value', 'label')}
+                {k: loc.get(k) for k in ('level', 'value', 'label', 'url')}
                 for loc in props.get('locations') or [] if isinstance(loc, dict)
             ],
         }

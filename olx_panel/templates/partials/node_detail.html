@@ -1,0 +1,48 @@
+{% set s = row.s %}{% set share = row.share %}
+<nav class="crumbs small" aria-label="Ancestors">
+  {% for a in ancestors %}<a href="#" hx-get="/coverage/node?path={{ a.path | urlencode }}&days={{ days }}" hx-target="#detail">{{ a.name }}</a> › {% endfor %}
+</nav>
+<h2>{{ s.name }} <span class="badge st-{{ s.status }}">{{ s.status }}</span></h2>
+<p class="muted small path">{{ s.path }}</p>
+{% if s.legacy %}
+<p class="note">Off-tree legacy scope: a hand-written start URL OLX accepted but its sitemap doesn't list. Its ads count under
+  <b>{{ s.parent_path }}</b>; its runs earn no freshness, because what it actually filtered is unknown.</p>
+{% endif %}
+{% if s.alias_of %}<p class="note">Alias of <b>{{ s.alias_of }}</b> — OLX serves the same listings at both URLs; runs on either count for both.</p>
+{% elif s.twins %}<p class="note">Also listed as <b>{{ s.twins | join(', ') }}</b> (alias twins share runs).</p>{% endif %}
+
+<dl class="facts">
+  <dt>OLX ads</dt><dd>{{ s.inventory | num }}{% if s.probed_at %} <span class="muted">probed {{ s.probed_at | day }}</span>{% endif %}</dd>
+  <dt>Collected</dt><dd>{{ s.collected_subtree | num }} <span class="muted">({{ s.collected | num }} via this exact scope)</span></dd>
+  <dt>Located here</dt><dd>{{ s.located | num }}</dd>
+  <dt>Fresh as of</dt>
+  <dd class="fr-{{ row.fresh_cls }}">{% if s.eff_at %}{{ s.eff_at | ts }} ({{ s.eff_at | ago }})
+    {% if s.eff_via != s.path %}<br><span class="muted small">via {{ s.eff_via }}</span>{% endif %}{% else %}never{% endif %}</dd>
+  <dt>Fresh ≤ {{ days }} d</dt><dd>{{ share.fresh | pct if share else '—' }}{% if share and share.weight %} <span class="muted">of {{ share.weight | num }} ads</span>{% endif %}</dd>
+  <dt>Baseline</dt><dd class="bl-{{ row.baseline_cls }}">{{ row.baseline }}
+    {% if s.complete_via and s.complete_via != s.path %}<br><span class="muted small">via {{ s.complete_via }}</span>{% endif %}</dd>
+  {% if url %}<dt>Start URL</dt><dd class="small"><a href="{{ url }}" target="_blank" rel="noreferrer">{{ url }}</a></dd>{% endif %}
+</dl>
+
+<h3>Runs on this scope ({{ s.runs | length }})</h3>
+{% if s.runs %}
+<div class="scroll">
+<table class="runs compact">
+  <thead><tr><th>Started</th><th>Outcome</th><th class="num">Pages</th><th class="num">New</th><th class="num">Took</th></tr></thead>
+  <tbody>
+  {% for r in s.runs[:40] %}
+    <tr title="{{ r.region }} · {{ r.run_id }} · {{ r.store }}{{ ' (file missing)' if r.file_missing }} · {{ r.duplicate_items | num }} already seen · invocation {{ r.invocation }}{{ ' · start page ' ~ r.start_page if r.start_page and r.start_page > 1 }}">
+      <td>{{ r.started_at | ts }}</td>
+      <td><span class="chip oc-{{ r.outcome }}" title="{{ (r.stop_reason or ['no stop reason']) | join(', ') }}{{ ' — ' ~ r.note if r.note }}">{{ r.outcome | replace('_', ' ') }}</span></td>
+      <td class="num">{{ r.pages_scraped | num }}</td>
+      <td class="num">{{ r.new_items | num }}</td>
+      <td class="num">{{ r.duration_s | duration }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if s.runs | length > 40 %}<p class="muted small">… {{ s.runs | length - 40 }} older runs</p>{% endif %}
+{% else %}
+<p class="muted">Never scraped as this exact scope.</p>
+{% endif %}

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}OLX panel{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/panel.css">
+  <script src="/static/vendor/htmx-2.0.4/htmx.min.js" defer></script>
+  <script src="/static/js/panel.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">OLX panel</span>
+    <nav class="nav">
+      {% for page in pages %}
+      <a href="/{{ page.slug }}" {% if page.slug == active %}class="active" aria-current="page"{% endif %}>{{ page.title }}</a>
+      {% endfor %}
+    </nav>
+    <div id="banner" class="banner" hx-get="/partials/banner?v={{ version }}"
+         hx-trigger="load, every 5s" aria-live="polite"></div>
+  </header>
+  <main>
+    {% block main %}{% endblock %}
+  </main>
+</body>
+</html>

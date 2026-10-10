@@ -1,0 +1,37 @@
+{% set b = status.browser %}
+<span class="pill {{ 'pill-busy' if b else 'pill-ok' }}"
+      title="{% if b %}{{ b.argv | join(' ') if b.argv else '' }}{% endif %}">
+  {% if b %}browser busy: {{ b.label or 'unknown' }} (pid {{ b.pid }}){% if b.since %} since {{ b.since[11:16] }}{% endif %}
+  {% else %}browser free{% endif %}
+</span>
+{% if not status.display %}
+<span class="pill pill-warn" title="Browser jobs need WSLg's DISPLAY/WAYLAND_DISPLAY">no display</span>
+{% endif %}
+{% if status.reconciliation %}
+<span class="pill pill-warn" title="Σ manifest new_items = {{ status.collected | num }}, catalog_data rows = {{ status.ad_count | num }}. A killed run inserts rows without writing a manifest.">
+  manifests vs DB: {{ '%+d' | format(status.reconciliation) }}
+</span>
+{% endif %}
+{% if status.unreadable %}
+<span class="pill pill-warn" title="{% for path, err in status.unreadable %}{{ path }}: {{ err }}&#10;{% endfor %}">
+  {{ status.unreadable | length }} unreadable manifest(s)
+</span>
+{% endif %}
+{% if status.stranded %}
+<span class="pill pill-warn" title="Partial bronze left by a killed run (never uploaded):&#10;{{ status.stranded | join('&#10;') }}">
+  {{ status.stranded | length }} stranded .tmp bronze file(s)
+</span>
+{% endif %}
+{% if status.unattached %}
+<span class="pill pill-warn" title="Runs whose region has no ancestor in the location tree">
+  {{ status.unattached | length }} unattached run(s)
+</span>
+{% endif %}
+{% if status.refresh_error %}
+<span class="pill pill-bad" title="{{ status.refresh_error }}">refresh failed</span>
+{% endif %}
+<span class="muted small" title="last scan of manifests and ads">scanned {{ status.last_refresh.strftime('%H:%M:%S') if status.last_refresh else '—' }}</span>
+{% if stale_page %}
+<button class="btn btn-small" onclick="location.reload()">new data — reload</button>
+{% endif %}
+<button class="btn btn-small btn-ghost" hx-post="/admin/refresh" hx-target="#banner" title="Rescan manifests and ads now">↻</button>
