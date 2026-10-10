@@ -225,6 +225,15 @@ secrets.yaml
 
 # Playwright/patchright persistent browser profile
 .playwright_profile/
+# Single-browser lock held by whichever process drives the profile
+.browser.lock
+
+# SQLite WAL side files (olx.sqlite / locations.sqlite run in WAL mode)
+*.sqlite-wal
+*.sqlite-shm
+
+git_suggestions/
+CLAUDE.md
 
 # Scraper logs and blocked-page dumps
 logs/

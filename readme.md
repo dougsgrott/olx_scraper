@@ -20,18 +20,25 @@ Ads are not tracked over time — no price history, no "still online" checks.
 ├── run_config_example.yaml
 │
 ├── olx_patchright/       # ACTIVE scraper package
-│   ├── browser.py        #   persistent-profile launch + SingletonLock preflight
+│   ├── browser.py        #   persistent-profile launch + single-browser lock (.browser.lock)
 │   ├── parse.py          #   OLX App Router flight-payload parsing
-│   ├── db.py             #   SQLite dedupe/insert (same catalog_data table as legacy)
+│   ├── db.py             #   SQLite dedupe/insert (same catalog_data table as legacy; WAL mode)
 │   ├── export.py         #   bronze .jsonl.gz + run manifest (same runs/ layout as legacy)
-│   ├── catalog.py        #   the scrape loop
-│   └── warm.py           #   interactive Cloudflare warm-up
+│   ├── catalog.py        #   the scrape loop (early stop, page cap, cooperative cancel)
+│   ├── plan.py           #   location-tree planning: node status, start-URL plans, URL/region mapping
+│   └── warm.py           #   Cloudflare warm-up (terminal or signal-driven)
 │
 ├── olx_scrapy/           # LEGACY Scrapy project (catalog + ad spiders, SQLAlchemy models)
 │
 ├── scripts/
-│   ├── pipeline.py       # cloud pipeline: bronze upload, silver/gold Athena transforms, verify
-│   └── warm_profile.py   # warm-up helper used by the legacy Scrapy entrypoint
+│   ├── pipeline.py            # cloud pipeline: bronze upload, silver/gold Athena transforms, verify
+│   ├── discover_locations.py  # harvest OLX's location tree from its sitemaps -> locations.sqlite
+│   ├── probe_density.py       # per-node ad counts (totalOfAds) over the tree; --report prints it
+│   ├── generate_start_urls.py # start-URL plan (leaf/dense/remainder) from the probed counts
+│   ├── measure_page_cap.py    # one-off: how many catalogue pages OLX serves per scope
+│   └── warm_profile.py        # warm-up helper used by the legacy Scrapy entrypoint
+│
+├── tests/                # pytest suite (uv run pytest); browser-free fakes in tests/fakes.py
 │
 ├── infra/
 │   ├── terraform/        # all AWS resources (bucket, Glue tables, Athena workgroup, IAM)
@@ -40,7 +47,7 @@ Ads are not tracked over time — no price history, no "still online" checks.
 │
 ├── runs/                 # bronze outbox (gitignored) — spider=catalog/dt=.../region=.../*.jsonl.gz
 ├── runs_uploaded/        # uploaded-runs archive (gitignored) — pipeline.py upload moves files here
-├── scraped_data/         # SQLite database (olx.sqlite)
+├── scraped_data/         # SQLite databases: olx.sqlite (dataset), locations.sqlite (location tree)
 └── docs/                 # ADRs, runbooks, glossary (docs/CONTEXT.md)
 ```
 
@@ -89,6 +96,11 @@ profile (`.playwright_profile/`, gitignored) and close the browser.
 uv run python run_patchright.py   # with mode: 'CATALOG'
 ```
 
+Another config file can be passed with `--config path/to/config.yaml` (the
+control panel will generate one per job). Exit codes: `0` ran (per-URL
+outcomes are in the manifests), `2` configuration error, `75` browser busy,
+`130` cancelled.
+
 This is the **active, recommended** path (see [ADR 0001](docs/adr/0001-scraper-on-home-box-not-aws.md)
 for why scraping happens on the home box rather than AWS). Start URLs are
 scraped **sequentially through one browser**, each getting its own bronze
@@ -115,10 +127,31 @@ geographic analysis. It prints the manifests as a list:
 ]
 ```
 
+Since manifest schema v2 each one also carries `schema_version`, the exact
+`start_url` (with any `?o=` resume offset, also parsed into `start_page`),
+`scope` (e.g. `imoveis/aluguel`), `invocation_id` (shared by all URLs of one
+run; `OLX_INVOCATION_ID` if set), `started_at`/`finished_at` with UTC offset,
+the applied `early_stop`, OLX's own `total_of_ads` / `listing_url` / `sort` /
+location `breadcrumb` from the first page, and `new_per_page`.
+
 `new_items` are appended to `scraped_data/olx.sqlite` (table `catalog_data`)
 and written to `runs/spider=catalog/dt=<dt>/region=<slug>/<run_id>.jsonl.gz`
 (bronze staging for the cloud pipeline below). Already-seen `uid`s are dropped
-— re-running the same URL is always safe.
+— re-running the same URL is always safe. Bronze files and manifests are
+written under a `.tmp` name and renamed when complete, so `pipeline.py upload`
+(which skips `.tmp`) never ships a partition that is still being written.
+
+**One browser at a time.** Every browser user (scrape, WARM, prober, sitemap
+harvest, page-cap probe, and the legacy entrypoint) takes `.browser.lock`
+first and keeps it until it exits. A second one exits with code `75` and says
+who holds the lock, instead of killing the first one's browser mid-scrape.
+Leftover chromium from a crashed run is still cleaned up — only by the lock
+holder.
+
+**Stopping a run.** Ctrl-C (SIGINT) or SIGTERM finishes the current page,
+records that start URL as `cancelled` and starts no further URL (no manifest
+for those); the run exits `130`. A second Ctrl-C stops at once (the current
+URL's manifest is still written).
 
 ### Early stopping
 
@@ -140,8 +173,22 @@ The patience rule and the hard cap are independent; omit the block (or set a
 knob to 0) to disable. The stale-page counter resets whenever a page yields
 enough new items, so featured/pinned ads reshuffled into every page don't
 trigger false stops. Why the run ended is recorded per start URL in the
-manifest's `stop_reason` (`exhausted`, `early_stop`, `max_pages`, or
-`no_payload`).
+manifest's `stop_reason`:
+
+| `stop_reason` | meaning | scope fully walked? |
+|---|---|---|
+| `exhausted` | reached the last page | yes |
+| `early_stop` | patience rule fired (caught up with already-seen ads) | caught up |
+| `max_pages` | hit the configured `max_pages` | no |
+| `page_cap` | OLX serves no further pages (100; past it, it re-serves page 100) — the scope is denser than one URL can reach | no |
+| `no_payload` | page had no ads payload (403 ⇒ Cloudflare, re-WARM) | no |
+| `nav_timeout` | navigation kept timing out | no |
+| `crashed` | unexpected error on this URL; the run moved on | no |
+| `cancelled` | stopped by SIGINT/SIGTERM | no |
+
+`page_cap` also guarantees termination: without early stop, a scope over the
+cap used to request `?o=101` forever. Runs from before 2026-10 that hit the cap
+show up as `early_stop` with 104 pages (100 real + 4 re-served).
 
 Early stopping works best with newest-first results — append `?sf=t` to a
 start URL (OLX's "Mais recentes" sort, verified) so new ads front-load and
@@ -159,8 +206,8 @@ scraping — not yet ported to `run_patchright.py`):
 uv run python run_scrapy.py       # mode: 'CATALOG', 'AD', or 'WARM'
 ```
 
-Do not run both entrypoints against the persistent profile at the same time —
-each holds `.playwright_profile/` exclusively (Chromium `SingletonLock`).
+Both entrypoints take the same `.browser.lock`, so a second one exits `75`
+instead of fighting over `.playwright_profile/`.
 
 ---
 
@@ -216,6 +263,23 @@ Open `scraped_data/olx.sqlite` with any SQLite browser (e.g.
 [DB Browser for SQLite](https://sqlitebrowser.org/)) to inspect
 `catalog_data` directly, or query the cloud copy via Athena
 (`olx_data.raw_catalog` / `silver_catalog_events` / `fact_listings`).
+
+Both SQLite files run in **WAL mode** (set by `olx_patchright/db.py` on first
+use), so readers never block a running scrape; expect `-wal`/`-shm` files next
+to them. WAL needs shared memory, so open the files from Linux/WSLg tools, not
+from Windows through `\\wsl$` (copy the file first, or use the SQLite backup
+API — a plain copy of a live WAL database can miss recent commits).
+
+## Tests
+
+```bash
+uv sync                  # includes the dev group (pytest)
+uv run pytest
+```
+
+The suite runs the real scrape loop, exporter, browser lock and signal
+handling against an in-process fake of patchright and OLX (`tests/fakes.py`),
+so it needs no browser or network.
 
 ## Next steps
 

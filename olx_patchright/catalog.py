@@ -3,15 +3,28 @@
 For each start URL: navigate, wait for the App Router flight payload to carry
 the ads list, map ads to records, keep first-seen uids (SQLite insert + bronze
 export), follow ?o=N pagination until the last page — or until an optional
-early-stop rule fires (consecutive stale pages, or a hard page cap).
+early-stop rule fires (consecutive stale pages, or a max_pages limit).
 
 A long run is kept alive by two guards: the browser context is recycled every
 PAGES_PER_BROWSER navigations (one context measurably degrades — see
 _BrowserSession), and a navigation that keeps timing out ends only the current
 start URL, never the whole run.
+
+A start URL also ends with 'page_cap' when OLX will serve no further pages
+(plan.PAGE_CAP; past it OLX silently re-serves the last page), so a scope
+denser than one URL can reach always terminates and is reported as truncated
+rather than as caught up.
+
+SIGINT/SIGTERM stop cooperatively: the current page finishes, its start URL is
+recorded as 'cancelled', and no further start URL begins (no manifest for
+them). A second signal raises KeyboardInterrupt at once — the manifest of the
+URL in progress is still written.
 """
 import os
+import signal
+import threading
 import time
+import uuid
 from datetime import datetime
 
 from patchright.sync_api import sync_playwright
@@ -19,8 +32,9 @@ from patchright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .browser import clear_profile_lock, launch_profile, first_page
 from .db import session_factory, uid_exists, insert_record
-from .export import EncounterExporter, infer_region
+from .export import EncounterExporter, infer_region, start_page_of
 from .parse import page_props, build_record, next_page_url
+from .plan import PAGE_CAP
 
 NAV_TIMEOUT_MS = 30000
 # Politeness delay between page navigations (was DOWNLOAD_DELAY = 3).
@@ -41,6 +55,46 @@ NAV_ATTEMPTS = 3
 NAV_RETRY_BACKOFF_S = 15
 # Distinct from None, which goto returns for a same-document navigation.
 _NAV_FAILED = object()
+# A page whose ads were (nearly) all on the previous page is OLX re-serving
+# the last page it is willing to serve.
+REPEAT_PAGE_OVERLAP = 0.9
+
+# Set by the first SIGINT/SIGTERM during scrape_catalog. A plain flag, not a
+# threading.Event: a signal handler that takes a lock the interrupted main
+# thread may be holding can deadlock.
+_stop_requested = False
+
+
+def _request_stop(signum, frame):
+    global _stop_requested
+    if _stop_requested:
+        raise KeyboardInterrupt
+    _stop_requested = True
+    # os.write, not print: print from a signal handler can hit a reentrant
+    # call into the stdout buffer the main thread is in the middle of.
+    os.write(2, f'\nSignal {signum}: stopping after the current page '
+                f'(signal again to stop now).\n'.encode())
+
+
+def _install_stop_handlers():
+    """Route SIGINT/SIGTERM to _request_stop; returns the handlers to restore.
+    Signal handlers can only be set from the main thread."""
+    global _stop_requested
+    _stop_requested = False
+    if threading.current_thread() is not threading.main_thread():
+        return {}
+    return {sig: signal.signal(sig, _request_stop)
+            for sig in (signal.SIGINT, signal.SIGTERM)}
+
+
+def _pause(seconds):
+    """time.sleep that returns early once a stop is requested."""
+    deadline = time.monotonic() + seconds
+    while not _stop_requested:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return
+        time.sleep(min(left, 0.25))
 
 
 class _BrowserSession:
@@ -75,7 +129,10 @@ class _BrowserSession:
         self._launch()
 
     def close(self):
-        self._ctx.close()
+        try:
+            self._ctx.close()
+        except Exception as exc:  # already gone (e.g. the driver got SIGINT)
+            print(f"Ignoring error while closing the browser: {exc}")
 
 
 def _wait_for_props(page):
@@ -106,9 +163,11 @@ def _goto_with_retry(session, url):
             return session.page.goto(url, wait_until='domcontentloaded')
         except PlaywrightTimeoutError:
             print(f"Navigation timeout ({attempt}/{NAV_ATTEMPTS}) at {url}.")
-            if attempt == NAV_ATTEMPTS:
+            if attempt == NAV_ATTEMPTS or _stop_requested:
                 return _NAV_FAILED
-            time.sleep(NAV_RETRY_BACKOFF_S)
+            _pause(NAV_RETRY_BACKOFF_S)
+            if _stop_requested:
+                return _NAV_FAILED
             session.force_recycle()
     return _NAV_FAILED
 
@@ -119,30 +178,54 @@ def scrape_catalog(start_urls, early_stop=None):
     Each start URL gets its own exporter (region inferred from its path), so a
     multi-city run writes one bronze partition + manifest per region instead
     of attributing everything to the first URL's region. A start URL that
-    fails is recorded and skipped, so one bad page cannot end the run.
+    fails is recorded and skipped, so one bad page cannot end the run; a stop
+    request (SIGINT/SIGTERM) ends the run after the current page.
     Returns the list of manifests, in start_urls order."""
     factory = session_factory()
     stop_cfg = _normalize_early_stop(early_stop)
+    invocation_id = os.environ.get('OLX_INVOCATION_ID') or \
+        f"cli-{datetime.now().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:6]}"
     manifests = []
 
-    with sync_playwright() as p:
-        session = _BrowserSession(p)
-        try:
-            for start_url in start_urls:
-                exporter = EncounterExporter(region=infer_region(start_url))
-                try:
-                    pages, reason = _scrape_from(
-                        session, start_url, factory, exporter, stop_cfg
+    previous_handlers = _install_stop_handlers()
+    try:
+        with sync_playwright() as p:
+            session = _BrowserSession(p)
+            try:
+                for start_url in start_urls:
+                    if _stop_requested:
+                        print(f"Stop requested: skipping the remaining "
+                              f"{len(start_urls) - len(manifests)} start URL(s).")
+                        break
+                    exporter = EncounterExporter(
+                        region=infer_region(start_url), start_url=start_url,
+                        invocation_id=invocation_id, early_stop=stop_cfg,
                     )
-                    exporter.record_stop(pages, reason)
-                except Exception as exc:
-                    print(f"Aborting {start_url}: {exc!r}. Continuing with "
-                          f"the next start URL.")
-                    exporter.record_stop(0, 'crashed')
-                finally:
-                    manifests.append(exporter.close())
-        finally:
-            session.close()
+                    try:
+                        reason = _scrape_from(
+                            session, start_url, factory, exporter, stop_cfg
+                        )
+                        exporter.record_stop(reason)
+                    except Exception as exc:
+                        reason = 'cancelled' if _stop_requested else 'crashed'
+                        print(f"Aborting {start_url} ({reason}): {exc!r}.")
+                        exporter.record_stop(reason)
+                    except BaseException:
+                        exporter.record_stop('cancelled')
+                        raise
+                    finally:
+                        manifests.append(exporter.close())
+            finally:
+                session.close()
+    except Exception as exc:
+        # After a terminal Ctrl-C the driver itself got SIGINT and is gone,
+        # so shutting playwright down can fail; the manifests are written.
+        if not _stop_requested:
+            raise
+        print(f"Ignoring browser shutdown error after the stop request: {exc!r}")
+    finally:
+        for sig, handler in previous_handlers.items():
+            signal.signal(sig, handler)
 
     return manifests
 
@@ -150,8 +233,8 @@ def scrape_catalog(start_urls, early_stop=None):
 def _normalize_early_stop(early_stop):
     """Clamp config to non-negative ints; 0 disables the corresponding rule.
     patience=0 (or a missing block) disables the stale-page rule; max_pages=0
-    disables the hard cap — so the default is the old paginate-to-the-end
-    behavior."""
+    disables the per-URL page limit — so the default paginates to the end
+    (or to OLX's page cap, whichever comes first)."""
     cfg = early_stop or {}
     return {
         'patience': max(0, int(cfg.get('patience') or 0)),
@@ -161,19 +244,24 @@ def _normalize_early_stop(early_stop):
 
 
 def _scrape_from(session, start_url, factory, exporter, stop_cfg):
-    """Paginate from start_url; return (pages_scraped, stop_reason) where
-    stop_reason is 'exhausted', 'early_stop', 'max_pages', 'no_payload', or
-    'nav_timeout'."""
+    """Paginate from start_url, counting each processed page on the exporter;
+    return the stop_reason: 'exhausted', 'early_stop', 'max_pages',
+    'page_cap', 'no_payload', 'nav_timeout' or 'cancelled'."""
     url = start_url
-    page_no = 0
+    page_no = start_page_of(start_url)  # absolute ?o= page being requested
+    pages_done = 0
     stale_pages = 0
+    prev_uids = set()
     while url:
-        page_no += 1
+        if _stop_requested:
+            return 'cancelled'
         response = _goto_with_retry(session, url)
         if response is _NAV_FAILED:
+            if _stop_requested:
+                return 'cancelled'
             print(f"Giving up on {url} after {NAV_ATTEMPTS} navigation "
                   f"timeouts; moving on to the next start URL.")
-            return page_no, 'nav_timeout'
+            return 'nav_timeout'
         status = response.status if response else 0
         props = _wait_for_props(session.page)
 
@@ -184,10 +272,24 @@ def _scrape_from(session, start_url, factory, exporter, stop_cfg):
                 f"{dump_path}. (403 => Cloudflare block, try WARM mode; "
                 f"200 => page structure changed.)"
             )
-            return page_no, 'no_payload'
+            return 'no_payload'
+
+        ads = props.get('ads') or []
+        uids = {str(ad['listId']) for ad in ads if ad.get('listId') is not None}
+        served_index = props.get('pageIndex')
+        if isinstance(served_index, int) and served_index != page_no:
+            print(f"Page cap: asked for page {page_no}, OLX served page "
+                  f"{served_index}; it serves no further pages of {start_url}.")
+            return 'page_cap'
+        if uids and prev_uids and \
+                len(uids & prev_uids) >= REPEAT_PAGE_OVERLAP * len(uids):
+            print(f"Page cap: page {page_no} repeats the previous page; OLX "
+                  f"serves no further pages of {start_url}.")
+            return 'page_cap'
+        exporter.record_scope(props)
 
         new = dup = 0
-        for ad in props.get('ads') or []:
+        for ad in ads:
             record = build_record(ad)
             if record is None:
                 continue
@@ -201,6 +303,9 @@ def _scrape_from(session, start_url, factory, exporter, stop_cfg):
                 insert_record(factory, record)
                 exporter.write_new(record)
                 new += 1
+        exporter.count_page(new)
+        pages_done += 1
+        prev_uids = uids
 
         print(f"Page {page_no} ({url}): {new} new, {dup} already seen.")
 
@@ -211,13 +316,18 @@ def _scrape_from(session, start_url, factory, exporter, stop_cfg):
                     f"Early stop: {stale_pages} consecutive page(s) with fewer "
                     f"than {stop_cfg['min_new_per_page']} new item(s)."
                 )
-                return page_no, 'early_stop'
-        if stop_cfg['max_pages'] and page_no >= stop_cfg['max_pages']:
+                return 'early_stop'
+        if stop_cfg['max_pages'] and pages_done >= stop_cfg['max_pages']:
             print(f"Stopping: reached max_pages = {stop_cfg['max_pages']}.")
-            return page_no, 'max_pages'
+            return 'max_pages'
 
         url = next_page_url(url, props)
+        if url and page_no >= PAGE_CAP:
+            print(f"Page cap: {start_url} has more than {PAGE_CAP} pages, "
+                  f"which is all OLX serves.")
+            return 'page_cap'
         if url:
+            page_no += 1
             session.count_page()
-            time.sleep(PAGE_DELAY_S)
-    return page_no, 'exhausted'
+            _pause(PAGE_DELAY_S)
+    return 'exhausted'

@@ -9,12 +9,16 @@ The harvested location tree lives in its own file
 restorable from S3 bronze, while locations is crawler planning state with no
 bronze representation — separate files keep the DR story clean and avoid
 single-writer lock contention between a scrape and a location probe.
+
+Both files run in WAL mode with a 30 s busy timeout: readers (the control
+panel, DB Browser) then never block the scraper's per-record commits, and a
+commit that does meet a lock waits instead of failing the start URL.
 """
 import json
 import os
 from datetime import datetime
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
+from sqlalchemy import create_engine, event, Column, Integer, String, DateTime, Text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -23,6 +27,7 @@ LOCATIONS_DB_PATH = os.path.join(ROOT, 'scraped_data', 'locations.sqlite')
 
 # Dict/list-valued record fields, stored as JSON text columns.
 JSON_FIELDS = {'details', 'pricing', 'badges', 'characteristics'}
+BUSY_TIMEOUT_S = 30
 
 
 class Base(DeclarativeBase):
@@ -100,16 +105,30 @@ class LocationRow(LocationBase):
     probed_at = Column(DateTime)
 
 
+def _engine(path):
+    """SQLite engine in WAL mode (persistent in the file; re-asserting it on
+    each connection is a no-op) with a generous busy timeout."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    engine = create_engine('sqlite:///' + path,
+                           connect_args={'timeout': BUSY_TIMEOUT_S})
+
+    @event.listens_for(engine, 'connect')
+    def _wal(dbapi_conn, _record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute('PRAGMA journal_mode=WAL')
+        cursor.close()
+
+    return engine
+
+
 def session_factory():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    engine = create_engine('sqlite:///' + DB_PATH)
+    engine = _engine(DB_PATH)
     Base.metadata.create_all(engine, checkfirst=True)
     return sessionmaker(bind=engine)
 
 
 def location_session_factory():
-    os.makedirs(os.path.dirname(LOCATIONS_DB_PATH), exist_ok=True)
-    engine = create_engine('sqlite:///' + LOCATIONS_DB_PATH)
+    engine = _engine(LOCATIONS_DB_PATH)
     LocationBase.metadata.create_all(engine, checkfirst=True)
     return sessionmaker(bind=engine)
 
