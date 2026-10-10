@@ -231,6 +231,8 @@ secrets.yaml
 # SQLite WAL side files (olx.sqlite / locations.sqlite run in WAL mode)
 *.sqlite-wal
 *.sqlite-shm
+# Control panel single-instance lock (panel.sqlite is covered by *.sqlite)
+scraped_data/panel.lock
 
 git_suggestions/
 CLAUDE.md

@@ -1,0 +1,19 @@
+<table class="runs nested">
+  <thead><tr><th>Started</th><th>Scope</th><th>Outcome</th><th class="num">Pages</th><th class="num">New</th><th class="num">Dup</th><th class="num">Took</th></tr></thead>
+  <tbody>
+  {% for r in invocation.runs %}
+    <tr>
+      <td>{{ r.started_at | ts }}</td>
+      <td class="small" title="{{ r.start_url or r.region }}">
+        {% if r.attach_path %}<a href="/coverage?q={{ r.node_path | urlencode }}">{{ r.node_path }}</a>{% else %}{{ r.node_path }}{% endif %}
+        {% if r.off_tree %}<span class="badge st-legacy">off-tree</span>{% endif %}
+      </td>
+      <td><span class="chip oc-{{ r.outcome }}" title="{{ (r.stop_reason or ['no stop reason']) | join(', ') }}{{ ' — ' ~ r.note if r.note }}">{{ r.outcome | replace('_', ' ') }}</span></td>
+      <td class="num">{{ r.pages_scraped | num }}</td>
+      <td class="num">{{ r.new_items | num }}</td>
+      <td class="num">{{ r.duplicate_items | num }}</td>
+      <td class="num">{{ r.duration_s | duration }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>

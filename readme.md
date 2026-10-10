@@ -30,6 +30,12 @@ Ads are not tracked over time — no price history, no "still online" checks.
 │
 ├── olx_scrapy/           # LEGACY Scrapy project (catalog + ad spiders, SQLAlchemy models)
 │
+├── olx_panel/            # local web control panel (python -m olx_panel) — see docs/CONTROL_PANEL.md
+│   ├── core/             #   manifests index, ad aggregate, location tree, coverage metrics (no web imports)
+│   ├── web/              #   FastAPI routes per page (Coverage, Runs)
+│   ├── templates/ static/#   Jinja2 + htmx (vendored, pinned; no npm)
+│   └── overrides.yaml    #   hand-kept corrections (legacy resume runs, off-tree regions)
+│
 ├── scripts/
 │   ├── pipeline.py            # cloud pipeline: bronze upload, silver/gold Athena transforms, verify
 │   ├── discover_locations.py  # harvest OLX's location tree from its sitemaps -> locations.sqlite
@@ -47,7 +53,7 @@ Ads are not tracked over time — no price history, no "still online" checks.
 │
 ├── runs/                 # bronze outbox (gitignored) — spider=catalog/dt=.../region=.../*.jsonl.gz
 ├── runs_uploaded/        # uploaded-runs archive (gitignored) — pipeline.py upload moves files here
-├── scraped_data/         # SQLite databases: olx.sqlite (dataset), locations.sqlite (location tree)
+├── scraped_data/         # SQLite: olx.sqlite (dataset), locations.sqlite (location tree), panel.sqlite (panel cache)
 └── docs/                 # ADRs, runbooks, glossary (docs/CONTEXT.md)
 ```
 
@@ -256,6 +262,42 @@ budget) are defined in `infra/terraform/` and applied with standard
 for the full workflow, IAM principal list, and credential rotation.
 
 ---
+
+## Control panel
+
+A localhost web app over the scraper's own files: per OLX location node
+(state → DDD area → sub-region/city → neighbourhood) how much was collected,
+OLX's live inventory, when it was last scraped and whether that run counts.
+
+```bash
+uv run python -m olx_panel              # http://localhost:8765 (also from the Windows browser)
+uv run python -m olx_panel reindex      # rebuild scraped_data/panel.sqlite (panel stopped)
+```
+
+- **Coverage** — the location tree (lazy, expand per node) with *Collected*
+  (Σ manifest `new_items`: ads first collected via that scope and below),
+  *Located* (ads whose own `uf`/macro-region is there), *OLX ads* (prober
+  count), *Last run*, *Fresh as of* (latest run that walked to the end or
+  caught up — on the node, an alias twin, or any ancestor), *Fresh* (share of
+  the node's plan-leaf inventory fresh within N days) and *Baseline* (ever
+  walked completely). Filters switch to a flat list. Click a node for its run
+  history.
+- **Runs** — every invocation found in the manifests (CLI, scheduled, later
+  the panel's own), with per-URL outcomes, plus a digest of `run_config.yaml`
+  that warns about `?o=` resume offsets, off-tree URLs and alias pairs.
+
+Run outcomes: `complete` (exhausted) and `caught up` (early stop before the
+page cap) earn freshness; `capped`, `partial`, `blocked`, `failed`,
+`cancelled`, `unknown`, `resume` (started past page 1) and `scope mismatch`
+(OLX served another scope, or an off-tree legacy region) do not. Runs the
+manifests can't classify correctly (legacy resumes) are flagged in
+`olx_panel/overrides.yaml`.
+
+The panel only reads `olx.sqlite`, `locations.sqlite`, the manifests and
+`run_config.yaml`; its own state is `scraped_data/panel.sqlite`, disposable
+(rebuilt from those files). It binds 127.0.0.1 only, rejects foreign
+`Host`/`Origin` headers, and refuses to start twice (`panel.lock`). Run it
+with one worker and no `--reload`.
 
 ## Viewing local data
 

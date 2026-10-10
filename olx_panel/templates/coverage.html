@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% block title %}Coverage · OLX panel{% endblock %}
+{% block main %}
+<section class="kpis">
+  <div class="kpi">
+    <div class="kpi-label">Ads collected</div>
+    <div class="kpi-value">{{ model.ad_count | num }}</div>
+    <div class="kpi-note">in olx.sqlite · Σ manifests {{ model.total_collected() | num }}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Fresh ≤ {{ days }} days</div>
+    <div class="kpi-value">{{ brazil.fresh | pct }}</div>
+    <div class="kpi-note">of {{ brazil.weight | num }} probed OLX ads (all states)</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Complete pass</div>
+    <div class="kpi-value">{{ brazil.baseline | pct }}</div>
+    <div class="kpi-note">of the same inventory, ever fully walked</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Scopes scraped</div>
+    <div class="kpi-value">{{ scopes_scraped | num }}</div>
+    <div class="kpi-note">{{ model.runs | length | num }} runs in {{ n_invocations }} invocations</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Last run</div>
+    {% if last_invocation %}
+    <div class="kpi-value">{{ last_invocation.started_at | ago }}</div>
+    <div class="kpi-note">{{ last_invocation.runs | length }} URLs · {{ last_invocation.total('new_items') | num }} new · <a href="/runs">runs</a></div>
+    {% else %}
+    <div class="kpi-value">—</div>
+    {% endif %}
+  </div>
+</section>
+
+<form class="filters" method="get" action="/coverage">
+  <label>Fresh within
+    <select name="days" onchange="this.form.submit()">
+      {% for d in day_choices %}<option value="{{ d }}" {% if d == days %}selected{% endif %}>{{ d }} days</option>{% endfor %}
+    </select>
+  </label>
+  <input type="search" name="q" value="{{ filters.q }}" placeholder="Search path or name" aria-label="Search">
+  <select name="uf" aria-label="State">
+    <option value="">All states</option>
+    {% for uf in ufs %}<option {% if uf == filters.uf %}selected{% endif %}>{{ uf }}</option>{% endfor %}
+  </select>
+  <select name="status" aria-label="Status">
+    <option value="">Any status</option>
+    {% for st in statuses %}<option {% if st == filters.status %}selected{% endif %}>{{ st }}</option>{% endfor %}
+  </select>
+  <label>Stale &gt;
+    <input type="number" name="stale" min="0" max="365" value="{{ filters.stale or '' }}" placeholder="days" class="narrow">
+  </label>
+  <label><input type="checkbox" name="never" value="1" {% if filters.never %}checked{% endif %}> never fresh</label>
+  <label><input type="checkbox" name="incomplete" value="1" {% if filters.incomplete %}checked{% endif %}> last run incomplete</label>
+  <button class="btn" type="submit">Filter</button>
+  {% if filtered %}<a class="btn btn-ghost" href="/coverage?days={{ days }}">Clear → tree</a>{% endif %}
+</form>
+
+<div class="split-view">
+  <section class="tree {{ 'flat' if filtered }}" aria-label="{{ 'Matching nodes' if filtered else 'Location tree' }}">
+    <div class="row head">
+      <span>{{ 'Node (' ~ rows|length ~ (' of more — narrow the filter' if truncated else '') ~ ')' if filtered else 'Location' }}</span>
+      <span title="planner status (threshold {{ model.tree.threshold | num }})">Status</span>
+      <span class="num" title="OLX's live ad count from the density prober">OLX ads</span>
+      <span class="num" title="Ads first collected via this scope and its subtree (Σ manifest new_items)">Collected</span>
+      <span class="num" title="Ads whose own location is here (states and DDD areas; deeper levels need the map phase)">Located</span>
+      <span title="Latest run on this exact scope">Last run</span>
+      <span title="Latest credited (complete / caught-up) run here or above">Fresh as of</span>
+      <span class="num" title="Share of this node's plan-leaf inventory fresh within {{ days }} days">Fresh</span>
+      <span title="Ever walked completely (here, above, or per plan leaf)">Baseline</span>
+    </div>
+    {% with flat = filtered %}{% include 'partials/tree_rows.html' %}{% endwith %}
+    {% if not rows %}<p class="empty">{{ 'Nothing matches.' if filtered else 'No location tree yet — run scripts/discover_locations.py.' }}</p>{% endif %}
+  </section>
+  <aside id="detail" class="detail" aria-live="polite">
+    <p class="muted">Select a node to see its runs.</p>
+  </aside>
+</div>
+{% endblock %}

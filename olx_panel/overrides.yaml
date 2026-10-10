@@ -1,0 +1,25 @@
+# Hand-maintained corrections the run manifests cannot express. Read on every
+# model rebuild (no reindex needed). Phase 2 adds crosswalk fixes here.
+
+# Legacy (schema v1) manifests don't record their start URL, so a manual
+# ?o= resume looks like a normal run. Flag such runs so they earn no
+# freshness credit: they skipped the newest pages.
+legacy_runs:
+  - region: estado-sp_sao-paulo-e-regiao_zona-oeste_pinheiros
+    run_id: "20260828T145018"
+    outcome: resume
+    note: started at ?o=92 after the 08-28 crash; reached page 104 (capped)
+  - region: estado-sp_sao-paulo-e-regiao_zona-oeste_pinheiros
+    run_id: "20260929T225145"
+    outcome: resume
+    note: stale ?o=92 left in run_config.yaml; re-read pages 92-95 only
+  - region: estado-sp_sao-paulo-e-regiao_zona-oeste_pinheiros
+    run_id: "20261007T214009"
+    outcome: resume
+    note: stale ?o=92 left in run_config.yaml; re-read pages 92-95 only
+
+# Off-tree regions (start URLs OLX accepted but its sitemap doesn't list)
+# count under their nearest existing ancestor; name another node here to
+# override. Example:
+#   estado-es_norte-do-espirito-santo_serra: estado-es/norte-do-espirito-santo
+legacy_regions: {}

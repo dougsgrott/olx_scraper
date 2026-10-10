@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block title %}Runs · OLX panel{% endblock %}
+{% block main %}
+<section class="card">
+  <h2>Next CLI / scheduled run <span class="muted small">{{ run_config.path }}</span></h2>
+  {% if run_config.error %}
+  <p class="pill pill-bad">run_config.yaml: {{ run_config.error }}</p>
+  {% else %}
+  <p>mode <b>{{ run_config.mode }}</b> · <b>{{ run_config.urls | length }}</b> start URLs
+    · scope {{ run_config.scopes | join(', ') or '—' }}
+    · early stop {% if run_config.early_stop %}{% for k, v in run_config.early_stop.items() %}{{ k }}={{ v }} {% endfor %}{% else %}off{% endif %}</p>
+  {% if run_config.offsets %}
+  <p class="pill pill-warn">{{ run_config.offsets | length }} URL(s) start past page 1 — they skip the newest ads and earn no freshness:</p>
+  <ul class="small">{% for url, page in run_config.offsets %}<li>{{ url }} (page {{ page }})</li>{% endfor %}</ul>
+  {% endif %}
+  {% if run_config.off_tree %}
+  <p class="pill pill-warn">{{ run_config.off_tree | length }} URL(s) are not in the location tree — OLX may serve a broader search there:</p>
+  <ul class="small">{% for url in run_config.off_tree %}<li>{{ url }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if run_config.alias_pairs %}
+  <p class="pill pill-warn">{{ run_config.alias_pairs | length }} alias pair(s) scraped twice (the second only re-reads duplicates):</p>
+  <ul class="small">{% for twin, canonical in run_config.alias_pairs %}<li>{{ twin }} = {{ canonical }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if not (run_config.offsets or run_config.off_tree or run_config.alias_pairs) %}<p class="muted small">No resume offsets, off-tree URLs or alias pairs.</p>{% endif %}
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Invocations ({{ invocations | length }})</h2>
+  <p class="muted small">From the run manifests in runs/ (outbox) and runs_uploaded/ (archive). Legacy manifests carry no invocation id;
+    they are grouped by time gaps.</p>
+  <table class="runs invocations">
+    <thead><tr><th></th><th>Started</th><th>Source</th><th class="num">URLs</th><th class="num">Pages</th><th class="num">New</th><th class="num">Dup</th><th class="num">Took</th><th>Outcomes</th><th>Store</th></tr></thead>
+    <tbody>
+    {% for inv in invocations %}
+      <tr>
+        <td><button class="toggle" aria-label="Show URLs" hx-get="/runs/invocation?key={{ inv.key | urlencode }}"
+                    hx-target="#inv-{{ loop.index }}" hx-trigger="click once" onclick="toggleRunRows(this, 'inv-{{ loop.index }}')">▸</button></td>
+        <td title="{{ inv.key }}">{{ inv.started_at | ts }}</td>
+        <td><span class="badge">{{ inv.source }}</span></td>
+        <td class="num">{{ inv.runs | length }}</td>
+        <td class="num">{{ inv.total('pages_scraped') | num }}</td>
+        <td class="num">{{ inv.total('new_items') | num }}</td>
+        <td class="num">{{ inv.total('duplicate_items') | num }}</td>
+        <td class="num">{{ ((inv.finished_at - inv.started_at).total_seconds() if inv.finished_at else none) | duration }}</td>
+        <td>{% for outcome, n in inv.outcomes.most_common() %}<span class="chip oc-{{ outcome }}">{{ n }} {{ outcome | replace('_', ' ') }}</span> {% endfor %}</td>
+        <td class="small">{{ inv.stores | join(', ') }}</td>
+      </tr>
+      <tr class="sub" hidden><td colspan="10" id="inv-{{ loop.index }}"></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

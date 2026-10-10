@@ -44,8 +44,9 @@ def test_exhausted_scope_writes_a_v2_manifest(workdir, fast_catalog, monkeypatch
     assert m['invocation_id'] == 'job-1'
     assert m['early_stop'] == {'patience': 0, 'min_new_per_page': 1, 'max_pages': 0}
     assert (m['total_of_ads'], m['listing_url'], m['sort']) == (120, ES, 'date')
-    assert m['breadcrumb'][2] == {'level': 'region', 'value': '27',
-                                  'label': 'DDD 27 - Norte do Espírito Santo'}
+    assert m['breadcrumb'][2] == {
+        'level': 'region', 'value': '27', 'label': 'DDD 27 - Norte do Espírito Santo',
+        'url': '/imoveis/aluguel/estado-es/norte-do-espirito-santo'}
     assert m['started_at'][-6] in '+-' and m['finished_at'] >= m['started_at']
     assert manifests_on_disk(workdir) == [m]
 
