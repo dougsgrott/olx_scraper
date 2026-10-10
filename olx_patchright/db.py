@@ -85,7 +85,10 @@ class LocationRow(LocationBase):
     sitemaps (scripts/discover_locations.py). `path` is the URL suffix that
     scopes a catalog page (prepend e.g. /imoveis/aluguel/ to get a start URL);
     depth 1 = state, then macro-region / sub-region / city-or-neighbourhood.
-    total_of_ads/probed_at are reserved for the density prober."""
+    total_of_ads/probed_at are written by the density prober
+    (scripts/probe_density.py); besides real counts, total_of_ads uses the
+    sentinels -1 (PADDED: scarce scope, served count is a broader search's)
+    and -2 (UNSCOPED: the URL's location segment filters nothing)."""
     __tablename__ = 'locations'
     path = Column(String(200), primary_key=True)
     uf = Column(String(5), index=True)

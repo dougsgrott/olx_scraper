@@ -70,7 +70,9 @@ class EncounterExporter:
 
     def record_stop(self, pages_scraped, stop_reason):
         """Per start URL: how many pages were fetched and why pagination ended
-        ('exhausted', 'early_stop', 'max_pages', or 'no_payload')."""
+        ('exhausted', 'early_stop', 'max_pages', 'no_payload', 'nav_timeout',
+        or 'crashed' — the last two mean the scope is INCOMPLETE and must be
+        re-run or resumed)."""
         self._pages_scraped += pages_scraped
         self._stop_reasons.append(stop_reason)
 
