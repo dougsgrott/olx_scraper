@@ -32,7 +32,11 @@ def command(job, settings, job_dir):
     """The argv for a job; writes whatever input files it needs into job_dir."""
     params = job.params
     if job.kind == SCRAPE:
-        catalog = {'start_urls': [u.url for u in job.urls]}
+        full = set(params.get('full_paths') or [])
+        mixed = bool(params.get('early_stop'))
+        catalog = {'start_urls': [{'url': u.url, 'early_stop': {}}
+                                  if mixed and u.path in full else u.url
+                                  for u in job.urls]}
         if params.get('early_stop'):
             catalog['early_stop'] = params['early_stop']
         path = _write_config(job_dir, {'mode': 'CATALOG', 'catalog_spider': catalog})

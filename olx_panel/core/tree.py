@@ -2,7 +2,7 @@
 planner's status per node and alias twins (olx_patchright/plan.py)."""
 import os
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from olx_patchright.plan import classify_node, find_aliases
@@ -47,8 +47,10 @@ def _local(value):
 
 
 class LocationTree:
-    def __init__(self, nodes, threshold):
+    def __init__(self, nodes, threshold, inventory_source=None):
         self.threshold = threshold
+        # path -> 'run' where a scrape's page-1 count replaced the probe's
+        self.inventory_source = inventory_source or {}
         self.nodes = {n.path: n for n in nodes}
         self.children = defaultdict(list)
         for n in sorted(nodes, key=lambda n: n.path):
@@ -100,6 +102,35 @@ def load_tree(locations_db, threshold):
 
 # Portuguese connectors stay lowercase inside place names ("Alto de Pinheiros").
 _CONNECTORS = frozenset({'de', 'da', 'do', 'das', 'dos', 'e'})
+
+
+def with_run_counts(tree, runs):
+    """The tree with each scope's OLX count brought up to date: a run
+    records OLX's live count on its first page (manifest v2 total_of_ads),
+    so a count newer than the probe's replaces it — status, plan kinds and
+    shares then follow OLX's current numbers. Sentinel nodes keep their
+    sentinel (a padded scope's served count is a broader search's), and
+    runs whose served scope didn't match the request are ignored."""
+    latest = {}
+    for run in runs:
+        count = run.total_of_ads
+        if not isinstance(count, int) or count < 0 or run.off_tree or \
+                run.outcome == 'scope_mismatch':
+            continue
+        if run.node_path not in latest or run.started_at > latest[run.node_path][1]:
+            latest[run.node_path] = (count, run.started_at)
+    nodes, sources = [], {}
+    for node in tree.nodes.values():
+        update = latest.get(node.path)
+        if update and (node.total_of_ads is None or node.total_of_ads >= 0) and \
+                (node.probed_at is None or update[1] > node.probed_at):
+            nodes.append(replace(node, total_of_ads=update[0], probed_at=update[1]))
+            sources[node.path] = 'run'
+        else:
+            nodes.append(node)
+    if not sources:
+        return tree
+    return LocationTree(nodes, tree.threshold, sources)
 
 
 def title_from_slug(slug):

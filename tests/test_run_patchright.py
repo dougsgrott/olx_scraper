@@ -30,6 +30,10 @@ def write_config(path, config):
     ({'mode': 'CATALOG', 'catalog_spider': {'start_urls': [ES], 'early_stop': 3}},
      'must be a mapping'),
     ({'mode': 'WARM'}, 'WARM mode needs'),
+    ({'mode': 'CATALOG', 'catalog_spider': {'start_urls': [{'early_stop': {}}]}},
+     'must be URLs or {url, early_stop} mappings'),
+    ({'mode': 'CATALOG', 'catalog_spider': {'start_urls': [{'url': ES, 'early_stop': 4}]}},
+     'must be URLs or {url, early_stop} mappings'),
 ])
 def test_config_errors_exit_2(tmp_path, capsys, config, message):
     path = tmp_path / 'run_config.yaml'

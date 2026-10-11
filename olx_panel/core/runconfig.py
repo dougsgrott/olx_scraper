@@ -38,7 +38,9 @@ def summarize_run_config(path, tree):
         return summary
     catalog = config.get('catalog_spider') or {}
     summary.mode = config.get('mode')
-    summary.urls = [u for u in catalog.get('start_urls') or [] if isinstance(u, str)]
+    summary.urls = [u.get('url') if isinstance(u, dict) else u
+                    for u in catalog.get('start_urls') or []
+                    if isinstance(u, str) or (isinstance(u, dict) and isinstance(u.get('url'), str))]
     summary.early_stop = catalog.get('early_stop')
     summary.scopes = sorted({infer_scope(u) for u in summary.urls})
     paths = {}

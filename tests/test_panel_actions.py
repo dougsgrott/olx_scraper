@@ -31,7 +31,7 @@ def test_plan_preview_and_yaml(app_client):
     full = client.post('/coverage/plan', headers=HX, data={
         'path': ['estado-xx/macro-a/zona-sul'], 'patience': '4', 'min_new_per_page': '5',
         'max_pages': '0', 'full_pass': '1'}).text
-    assert 'name="full_pass" value="1" checked' in full
+    assert 'value="full" checked' in full  # the legacy full_pass field means mode=full
     response = client.post('/coverage/plan/yaml', headers={'Origin': 'http://localhost'},
                            data={'path': ['estado-xx/macro-b']})
     assert response.headers['content-disposition'].startswith('attachment')

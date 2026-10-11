@@ -2,9 +2,17 @@
 <h2>Scrape plan</h2>
 <form id="plan-form" hx-post="/coverage/plan" hx-target="#detail" hx-trigger="change">
   {% for p in preview.paths %}<input type="hidden" name="path" value="{{ p }}">{% endfor %}
+  {% set unwalked = preview.never_walked %}
   <div class="plan-options">
-    <label title="Walk every page up to OLX's page cap: for first passes and interrupted ones">
-      <input type="checkbox" name="full_pass" value="1" {% if o.full_pass %}checked{% endif %}> Full pass</label>
+    <span class="muted">Mode</span>
+    <label title="Stop each URL once its newest ads are already known">
+      <input type="radio" name="mode" value="incremental" {% if o.mode == 'incremental' %}checked{% endif %}> Early stop</label>
+    <label title="Walk to the last page only the scopes never walked to the end; early stop for the rest">
+      <input type="radio" name="mode" value="smart" {% if o.mode == 'smart' %}checked{% endif %}> Full pass where never walked{% if unwalked %} ({{ unwalked | length }}){% endif %}</label>
+    <label title="Walk every URL to its last page (up to OLX's page cap)">
+      <input type="radio" name="mode" value="full" {% if o.mode == 'full' %}checked{% endif %}> Full pass (all)</label>
+  </div>
+  <div class="plan-options">
     <label title="Stop after this many consecutive pages with fewer new ads than the minimum">Patience
       <input type="number" name="patience" min="0" max="50" value="{{ o.patience }}" class="narrow" {% if o.full_pass %}title="ignored in a full pass"{% endif %}></label>
     <label>Min new/page <input type="number" name="min_new_per_page" min="1" max="50" value="{{ o.min_new_per_page }}" class="narrow"></label>
@@ -13,12 +21,12 @@
 
   <p class="totals"><b>{{ preview.items | length }}</b> URL(s) · ~{{ preview.pages | num }} pages ·
     ~{{ preview.seconds | duration }} <span class="muted small">at {{ '%.1f' | format(preview.seconds_per_page) }} s/page</span></p>
-  {% set unwalked = preview.never_walked %}
-  {% if unwalked and not o.full_pass %}
+  {% if unwalked and o.mode == 'incremental' %}
   <p class="note small">{{ unwalked | length }} of these scope(s) were never walked to their last page, so their
     <b>baseline</b> stays incomplete — early stop halts once the newest ads are known, and older ads never collected
-    may sit deeper. Tick <b>Full pass</b> to walk them to the end once (~{{ preview.never_walked_pages | num }} pages,
-    ~{{ (preview.never_walked_pages * preview.seconds_per_page) | duration }}); afterwards early stop keeps them fresh.</p>
+    may sit deeper. Choose <b>Full pass where never walked</b> to walk just those to the end once
+    (~{{ preview.never_walked_pages | num }} pages, ~{{ (preview.never_walked_pages * preview.seconds_per_page) | duration }});
+    afterwards early stop keeps them fresh.</p>
   {% endif %}
   {% if browser %}<p class="pill pill-busy">browser busy ({{ browser.label }}): the job will wait for it</p>{% endif %}
   {% for w in preview.warnings %}<p class="pill pill-warn">{{ w }}</p>{% endfor %}
@@ -42,7 +50,7 @@
       <td>{{ i.name }}{% if i.queued %} <span class="badge pill-busy">queued</span>{% endif %}</td>
       <td><span class="badge st-{{ 'leaf' if i.kind == 'leaf' else ('dense' if i.kind == 'dense' else 'split') }}">{{ i.kind }}</span></td>
       <td class="num">{{ i.count | num }}</td>
-      <td class="num">{{ i.est_pages }}</td>
+      <td class="num">{{ i.est_pages }}{% if i.full and o.mode != 'full' %} <span class="badge kind" title="walked to the end in this run">full</span>{% endif %}</td>
       <td>{% if i.last_run %}<span class="dot oc-{{ i.last_run.outcome }}" title="{{ i.last_run.outcome }}"></span>{{ i.last_run.started_at | day }}{% else %}<span class="muted">never</span>{% endif %}</td>
       <td>{% if i.complete_at %}<span class="bl-complete">{{ i.complete_at | day }}</span>
         {% elif i.kind == 'leaf' %}<span class="bl-partial">never</span>

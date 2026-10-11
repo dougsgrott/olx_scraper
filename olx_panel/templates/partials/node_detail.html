@@ -27,13 +27,17 @@
 {% elif s.twins %}<p class="note">Also listed as <b>{{ s.twins | join(', ') }}</b> (alias twins share runs).</p>{% endif %}
 
 <dl class="facts">
-  <dt>OLX ads</dt><dd>{{ s.inventory | num }}{% if s.probed_at %} <span class="muted">probed {{ s.probed_at | day }}</span>{% endif %}</dd>
+  <dt>OLX ads</dt><dd>{{ s.inventory | num }}{% if s.probed_at %} <span class="muted">{{ 'from the run of' if s.inventory_source == 'run' else 'probed' }} {{ s.probed_at | day }}</span>{% endif %}</dd>
   <dt>Collected</dt><dd>{{ s.collected_subtree | num }} <span class="muted">({{ s.collected | num }} via this exact scope)</span></dd>
   <dt>Located here</dt><dd>{{ s.located | num }}</dd>
   <dt>Fresh as of</dt>
   <dd class="fr-{{ row.fresh_cls }}">{% if s.eff_at %}{{ s.eff_at | ts }} ({{ s.eff_at | ago }})
     {% if s.eff_via != s.path %}<br><span class="muted small">via {{ s.eff_via }}</span>{% endif %}{% else %}never{% endif %}</dd>
   <dt>Fresh ≤ {{ days }} d</dt><dd>{{ share.fresh | pct if share else '—' }}{% if share and share.weight %} <span class="muted">of {{ share.weight | num }} ads</span>{% endif %}</dd>
+  <dt>Yield</dt><dd>{% if s.yield_per_day is not none %}≈ {{ '%.1f' | format(s.yield_per_day) }} new/day
+    <span class="muted small">({{ s.yield_since | day }} → {{ s.yield_until | day }})</span>
+    {% if expected is not none %}<br>~{{ expected | round | int | num }} expected since fresh{% if due %} · <b class="bl-partial">due</b>{% endif %}{% endif %}
+    {% else %}<span class="muted">needs two runs that caught up or completed</span>{% endif %}</dd>
   <dt>Baseline</dt><dd class="bl-{{ row.baseline_cls }}">{{ row.baseline }}
     {% if s.complete_via and s.complete_via != s.path %}<br><span class="muted small">via {{ s.complete_via }}</span>{% endif %}</dd>
   {% if url %}<dt>Start URL</dt><dd class="small"><a href="{{ url }}" target="_blank" rel="noreferrer">{{ url }}</a></dd>{% endif %}
@@ -43,7 +47,7 @@
 {% if s.runs %}
 <div class="scroll">
 <table class="runs compact">
-  <thead><tr><th>Started</th><th>Outcome</th><th class="num">Pages</th><th class="num">New</th><th class="num">Took</th></tr></thead>
+  <thead><tr><th>Started</th><th>Outcome</th><th class="num">Pages</th><th class="num">New</th><th class="num" title="OLX's count on the run's first page (v2 manifests)">OLX</th><th class="num">Took</th></tr></thead>
   <tbody>
   {% for r in s.runs[:40] %}
     <tr title="{{ r.region }} · {{ r.run_id }} · {{ r.store }}{{ ' (file missing)' if r.file_missing }} · {{ r.duplicate_items | num }} already seen · invocation {{ r.invocation }}{{ ' · start page ' ~ r.start_page if r.start_page and r.start_page > 1 }}">
@@ -51,6 +55,7 @@
       <td><span class="chip oc-{{ r.outcome }}" title="{{ (r.stop_reason or ['no stop reason']) | join(', ') }}{{ ' — ' ~ r.note if r.note }}">{{ r.outcome | replace('_', ' ') }}</span></td>
       <td class="num">{{ r.pages_scraped | num }}</td>
       <td class="num">{{ r.new_items | num }}</td>
+      <td class="num" title="{% if r.total_of_ads %}the run saw {{ r.total_seen | num }} of them{% endif %}">{{ r.total_of_ads | num }}</td>
       <td class="num">{{ r.duration_s | duration }}</td>
     </tr>
   {% endfor %}

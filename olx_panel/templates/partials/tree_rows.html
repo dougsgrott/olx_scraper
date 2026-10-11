@@ -15,11 +15,11 @@
       {% elif s.twins %}<span class="badge badge-alias" title="Also listed as {{ s.twins | join(', ') }}">has alias</span>{% endif %}
     </span>
     <span><span class="badge st-{{ s.status }}">{{ s.status }}</span></span>
-    <span class="num" title="{% if s.probed_at %}probed {{ s.probed_at | ts }}{% endif %}">{{ s.inventory | num }}</span>
+    <span class="num" title="{% if s.probed_at %}{{ 'from the run of' if s.inventory_source == 'run' else 'probed' }} {{ s.probed_at | ts }}{% endif %}">{{ s.inventory | num }}</span>
     <span class="num" title="this scope itself: {{ s.collected | num }}">{{ s.collected_subtree | num }}</span>
     <span class="num">{{ s.located | num }}</span>
     <span>{% if s.last_run %}<span class="dot oc-{{ s.last_run.outcome }}" title="{{ s.last_run.outcome }}{{ ': ' ~ s.last_run.note if s.last_run.note }}"></span>{{ s.last_run.started_at | day }}{% else %}<span class="muted">—</span>{% endif %}</span>
-    <span class="fr-{{ row.fresh_cls }}" title="{% if s.eff_via and s.eff_via != s.path %}via {{ s.eff_via }}{% endif %}">
+    <span class="fr-{{ row.fresh_cls }}" title="{% if s.eff_via and s.eff_via != s.path %}via {{ s.eff_via }}{% endif %}{% if s.yield_per_day is not none %} · ≈ {{ '%.1f' | format(s.yield_per_day) }} new/day{% endif %}">
       {% if row.fresh_cls == 'legacy' %}no credit{% elif s.eff_at %}{{ s.eff_at | ago }}{% if s.eff_via != s.path %} ↑{% endif %}{% elif row.fresh_cls == 'never' %}never{% else %}—{% endif %}
     </span>
     <span class="num">{% if share and share.fresh is not none %}<span class="bar" style="--v: {{ (share.fresh * 100) | round(1) }}%"></span>{{ share.fresh | pct }}{% else %}<span class="muted">—</span>{% endif %}</span>
