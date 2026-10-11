@@ -3,9 +3,9 @@
   collected        Σ new_items of the node's runs — ads first collected via
                    this scope (exact: delta-only bronze); the tree shows the
                    subtree sum.
-  located          ads whose own location is in the place; exact for states
-                   (uf) and DDD areas (ad URL's macro segment) — deeper levels
-                   need the Phase 2 crosswalk.
+  located          ads whose own location is in the place: states (uf), DDD
+                   areas (ad URL's macro segment) and city nodes (the ad's
+                   municipality, via the IBGE crosswalk in geo.py).
   inventory        OLX's live count from the prober (never summed over
                    children: aliases double count, parents hold ads with no
                    neighbourhood).
@@ -56,6 +56,8 @@ class NodeStats:
     uf: str
     parent_path: str
     status: str
+    kind: str = None          # crosswalk kind (geo.KINDS); None without geo assets
+    code: str = None          # IBGE municipality code for place kinds
     inventory: int = None
     probed_at: object = None
     alias_of: str = None
@@ -115,27 +117,33 @@ class Invocation:
 
 
 class CoverageModel:
-    def __init__(self, tree, runs, ad_rows, ad_count, page_cap):
+    def __init__(self, tree, runs, ad_rows, ad_count, page_cap, geo=None,
+                 ad_aliases=None):
         self.tree = tree
         self.runs = runs
         self.ad_count = ad_count
         self.page_cap = page_cap
+        self.geo = geo  # geo.Crosswalk, or None until scripts/build_geo.py ran
         self.stats = {}
         self.unattached = [r for r in runs if r.attach_path is None]
         labels = self._labels(runs)
         for node in tree.walk():
+            place = geo.nodes.get(node.path) if geo else None
             self.stats[node.path] = NodeStats(
                 path=node.path, depth=node.depth, uf=node.uf,
                 parent_path=node.parent_path,
-                name=self._name(node.path, node.uf, node.depth, labels),
-                status=tree.status[node.path], inventory=node.inventory,
+                name=self._name(node.path, node.uf, node.depth, labels, place, geo),
+                status=tree.status[node.path],
+                kind=place.kind if place else None,
+                code=place.code if place else None,
+                inventory=node.inventory,
                 probed_at=node.probed_at, alias_of=tree.alias_of.get(node.path),
                 twins=sorted(tree.twins.get(node.path, set()) - {node.path}),
                 children=[k.path for k in tree.children[node.path]],
             )
         self._attach_runs(labels)
         self._roll_up_collected()
-        self._locate(ad_rows)
+        self._locate(ad_rows, ad_aliases or {})
         self._freshness()
         self._share_cache = {}
 
@@ -155,10 +163,14 @@ class CoverageModel:
         return labels
 
     @staticmethod
-    def _name(path, uf, depth, labels):
+    def _name(path, uf, depth, labels, place=None, geo=None):
         if depth == 1 and uf in UF_NAMES:
             return UF_NAMES[uf]
-        return labels.get(path) or title_from_slug(path.rsplit('/', 1)[-1])
+        if path in labels:
+            return labels[path]
+        if place and place.kind == 'city' and place.code in geo.gaz.by_code:
+            return geo.gaz.by_code[place.code].name
+        return title_from_slug(path.rsplit('/', 1)[-1])
 
     def _attach_runs(self, labels):
         for run in sorted(self.runs, key=lambda r: r.started_at, reverse=True):
@@ -191,12 +203,30 @@ class CoverageModel:
         for root in self.tree.roots:
             total(root.path)
 
-    def _locate(self, ad_rows):
+    def _locate(self, ad_rows, ad_aliases):
         by_uf = Counter()
         by_macro = Counter()
+        self.located_by_area = Counter()   # 'SP-11' -> ads (the ad's own ddd)
+        self.located_by_code = Counter()   # IBGE code -> ads
+        self.ad_rows_by_code = defaultdict(list)
+        self.unmatched_ad_places = Counter()  # (uf, municipality) -> ads
+        gaz = self.geo.gaz if self.geo else None
+        codes = {}
         for row in ad_rows:
-            by_uf[row['uf'].upper()] += row['n']
-            by_macro[(row['uf'].upper(), row['macro'])] += row['n']
+            uf = row['uf'].upper()
+            by_uf[uf] += row['n']
+            by_macro[(uf, row['macro'])] += row['n']
+            self.located_by_area[f"{uf}-{row['ddd']}"] += row['n']
+            if gaz is None:
+                continue
+            key = (uf, row['municipality'])
+            if key not in codes:
+                codes[key] = gaz.by_name(row['municipality'], uf, ad_aliases)
+            if codes[key]:
+                self.located_by_code[codes[key]] += row['n']
+                self.ad_rows_by_code[codes[key]].append(row)
+            else:
+                self.unmatched_ad_places[key] += row['n']
         for stats in self.stats.values():
             if stats.legacy:
                 continue
@@ -204,6 +234,8 @@ class CoverageModel:
                 stats.located = by_uf.get(stats.uf, 0)
             elif stats.depth == 2:
                 stats.located = by_macro.get((stats.uf, stats.slug), 0)
+            elif stats.kind == 'city':
+                stats.located = self.located_by_code.get(stats.code, 0)
 
     def _group_runs(self, stats):
         members = [stats] + [self.stats[t] for t in stats.twins if t in self.stats]

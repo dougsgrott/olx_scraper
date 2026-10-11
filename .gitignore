@@ -233,6 +233,8 @@ secrets.yaml
 *.sqlite-shm
 # Control panel single-instance lock (panel.sqlite is covered by *.sqlite)
 scraped_data/panel.lock
+# Map assets built by scripts/build_geo.py (IBGE + kelvins; rebuildable)
+scraped_data/geo/
 
 git_suggestions/
 CLAUDE.md

@@ -1,10 +1,15 @@
-"""Coverage page: the OLX location tree with what was collected, OLX's live
-inventory and freshness per node; filters switch to a flat list."""
+"""Coverage page: a map of Brazil (states, DDD areas, municipalities) over
+the OLX location tree with what was collected, OLX's live inventory and
+freshness per node; filters switch the tree to a flat list."""
+import os
+from collections import defaultdict
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 
-from olx_patchright.plan import start_url
+from olx_patchright.plan import norm, start_url
+from olx_panel.core.mapdata import LEVELS, METRICS, locate, map_payload
 from olx_panel.core.metrics import PROBLEM_STATUSES
 from olx_panel.core.tree import UF_NAMES
 
@@ -93,6 +98,7 @@ def coverage(request: Request, days: int = 0, q: str = '', uf: str = '',
         n_invocations=len(invocations),
         scopes_scraped=sum(1 for s in model.stats.values() if s.runs),
         version=svc.status()['version'],
+        map_ready=model.geo is not None, levels=LEVELS, metrics=METRICS,
     )
 
 
@@ -123,3 +129,91 @@ def node_detail(request: Request, path: str, days: int = 0):
                   url=url, ancestors=[model.stats[p] for p in
                                       reversed(model.tree.ancestors(path))
                                       if p in model.stats])
+
+
+# -- map ----------------------------------------------------------------------
+
+@router.get('/geo/br-municipios.topo.json')
+def topology(request: Request):
+    path = service(request).settings.geo_topology
+    if not os.path.exists(path):
+        raise HTTPException(404, 'map assets missing: run '
+                                 '`uv run python scripts/build_geo.py`')
+    return FileResponse(path, media_type='application/json',
+                        headers={'Cache-Control': 'no-cache'})
+
+
+@router.get('/api/map')
+def map_values(request: Request, level: str = 'uf', metric: str = 'located',
+               days: int = 0):
+    model = service(request).model()
+    if model.geo is None:
+        raise HTTPException(404, 'map assets missing')
+    if level not in LEVELS or metric not in METRICS:
+        raise HTTPException(400, f'unknown level/metric: {level}/{metric}')
+    return JSONResponse(map_payload(model, level, metric, _days(request, days),
+                                    datetime.now().astimezone()))
+
+
+@router.get('/api/locate')
+def locate_node(request: Request, path: str):
+    found = locate(service(request).model(), path)
+    if found is None:
+        raise HTTPException(404, f'unknown location path: {path}')
+    return found
+
+
+def _hood_matches(model, roots):
+    """Neighbourhood nodes under a municipality's nodes, by normalised slug."""
+    nodes = {}
+    stack = list(roots)
+    while stack:
+        path = stack.pop()
+        stats = model.stats.get(path)
+        if stats is None:
+            continue
+        if stats.kind == 'neighbourhood':
+            nodes[stats.slug] = path
+        stack.extend(stats.children)
+    return nodes
+
+
+def _match_hood(name, hood_nodes):
+    """The tree node an ad's neighbourhood name most likely falls under:
+    exact slug, else containment (OLX groups bairros: ibirapuera-jd-luzitania)."""
+    key = norm(name or '')
+    if not key:
+        return None
+    if key in hood_nodes:
+        return hood_nodes[key], True
+    for slug, path in hood_nodes.items():
+        if len(key) >= 4 and (key in slug or (len(slug) >= 4 and slug in key)):
+            return path, False
+    return None
+
+
+@router.get('/coverage/muni')
+def municipality_detail(request: Request, code: str, days: int = 0):
+    model = service(request).model()
+    geo = model.geo
+    if geo is None or code not in geo.gaz.by_code:
+        raise HTTPException(404, f'unknown municipality: {code}')
+    place = geo.gaz.by_code[code]
+    days = _days(request, days)
+    now = datetime.now().astimezone()
+    own = [model.stats[p] for p in geo.muni_nodes.get(code, []) if p in model.stats]
+    area_macro = geo.area_macro.get(place.area)
+    hood_nodes = _hood_matches(model, [s.path for s in own])
+    hoods = defaultdict(lambda: {'n': 0, 'last_seen': None})
+    for row in model.ad_rows_by_code.get(code, []):
+        hood = hoods[row['neighbourhood']]
+        hood['n'] += row['n']
+        hood['last_seen'] = max(filter(None, (hood['last_seen'], row['last_seen'])),
+                                default=None)
+    hood_rows = sorted(({'name': name, 'n': h['n'], 'last_seen': h['last_seen'],
+                         'match': _match_hood(name, hood_nodes)}
+                        for name, h in hoods.items()), key=lambda r: -r['n'])
+    return render(request, 'partials/muni_detail.html', place=place, days=days,
+                  rows=_rows(model, own, days, now),
+                  area_macro=model.stats.get(area_macro) if area_macro else None,
+                  located=model.located_by_code.get(code, 0), hoods=hood_rows)

@@ -18,6 +18,9 @@ class Settings:
     panel_lock: str = os.path.join(ROOT, 'scraped_data', 'panel.lock')
     run_config: str = os.path.join(ROOT, 'run_config.yaml')
     overrides: str = os.path.join(PACKAGE_DIR, 'overrides.yaml')
+    # Map assets built by scripts/build_geo.py
+    geo_topology: str = os.path.join(ROOT, 'scraped_data', 'geo', 'br-municipios.topo.json')
+    geo_csv: str = os.path.join(ROOT, 'scraped_data', 'geo', 'municipios.csv')
     # (store, directory): manifests and bronze live in the outbox until
     # `pipeline.py upload` moves them to the archive.
     runs_dirs: tuple = field(default_factory=lambda: (

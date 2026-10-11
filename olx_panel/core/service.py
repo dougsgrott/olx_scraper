@@ -12,8 +12,11 @@ import threading
 from datetime import datetime
 
 from olx_patchright.browser import lock_holder
+from olx_patchright.export import infer_region
+from olx_patchright.plan import path_of
 
 from .adgeo import load_ad_agg, refresh_ad_agg
+from .geo import Crosswalk, load_gazetteer
 from .manifests import index_manifests, interpret, load_runs
 from .metrics import CoverageModel
 from .overrides import load_overrides
@@ -34,6 +37,8 @@ class PanelService:
         self._model_key = None
         self._tree = None
         self._tree_key = None
+        self._gazetteer = None
+        self._gazetteer_key = None
         self.last_refresh = None
         self.refresh_error = None
         self.unreadable = ()
@@ -71,7 +76,8 @@ class PanelService:
             manifests = self.store.get_meta(conn, 'manifest_version', 0)
             ads = self.store.get_meta(conn, 'ad_version', 0)
         return (manifests, ads, file_version(self.settings.locations_db),
-                file_version(self.settings.overrides))
+                file_version(self.settings.overrides),
+                file_version(self.settings.geo_csv))
 
     def tree(self):
         key = file_version(self.settings.locations_db)
@@ -81,6 +87,15 @@ class PanelService:
                                        self.settings.threshold)
                 self._tree_key = key
             return self._tree
+
+    def gazetteer(self):
+        """IBGE municipalities with DDDs, or None before build_geo.py ran."""
+        key = file_version(self.settings.geo_csv)
+        with self._lock:
+            if key != self._gazetteer_key:
+                self._gazetteer = load_gazetteer(self.settings.geo_csv)
+                self._gazetteer_key = key
+            return self._gazetteer
 
     def model(self):
         key = self.data_version()
@@ -93,8 +108,12 @@ class PanelService:
                                  self.settings.invocation_gap_s)
                 with self.store.connect() as conn:
                     ad_count = int(self.store.get_meta(conn, 'ad_count', 0))
+                gazetteer = self.gazetteer()
+                geo = Crosswalk(tree, gazetteer, overrides.crosswalk,
+                                _breadcrumb_ddds(runs)) if gazetteer else None
                 self._model = CoverageModel(tree, runs, load_ad_agg(self.store),
-                                            ad_count, self.settings.page_cap)
+                                            ad_count, self.settings.page_cap, geo,
+                                            overrides.ad_municipalities)
                 self._model_key = key
             return self._model
 
@@ -116,10 +135,26 @@ class PanelService:
             'unreadable': self.unreadable,
             'stranded': self.stranded if holder is None else [],
             'unattached': model.unattached,
+            'geo_missing': model.geo is None,
+            'unmatched_places': sorted(model.unmatched_ad_places.items()),
+            'unknown_nodes': model.geo.report()['unknown'] if model.geo else [],
             'refresh_error': self.refresh_error,
             'last_refresh': self.last_refresh,
             'version': '-'.join(str(v) for v in self.data_version()[:2]),
         }
+
+
+def _breadcrumb_ddds(runs):
+    """OLX's own word on each macro's DDD: the `region` level of a v2
+    manifest's breadcrumb carries the DDD number as its value."""
+    ddds = {}
+    for run in sorted(runs, key=lambda r: r.started_at):
+        for crumb in run.breadcrumb or []:
+            if crumb.get('level') == 'region' and crumb.get('url') and crumb.get('value'):
+                region = infer_region(crumb['url'])
+                if region != 'unknown':
+                    ddds[path_of(region)] = str(crumb['value'])
+    return ddds
 
 
 class Refresher(threading.Thread):

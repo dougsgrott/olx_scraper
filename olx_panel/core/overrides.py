@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 import yaml
 
+from .geo import KINDS
+
 from .manifests import CREDITED, COMPLETE, CAUGHT_UP, CAPPED, PARTIAL, BLOCKED, \
     FAILED, CANCELLED, UNKNOWN, RESUME, SCOPE_MISMATCH
 
@@ -17,6 +19,8 @@ OUTCOMES = frozenset({COMPLETE, CAUGHT_UP, CAPPED, PARTIAL, BLOCKED, FAILED,
 class Overrides:
     legacy_runs: dict = field(default_factory=dict)     # (region, run_id) -> (outcome, note)
     legacy_regions: dict = field(default_factory=dict)  # region -> attach path
+    crosswalk: dict = field(default_factory=dict)       # node path -> (kind, IBGE code)
+    ad_municipalities: dict = field(default_factory=dict)  # (uf, name) -> IBGE code
     version: object = None
 
 
@@ -35,4 +39,13 @@ def load_overrides(path):
         runs[(entry['region'], str(entry['run_id']))] = (outcome, entry.get('note'))
     regions = {region: attach for region, attach in
                (data.get('legacy_regions') or {}).items()}
-    return Overrides(runs, regions, version)
+    crosswalk = {}
+    for path, entry in (data.get('crosswalk') or {}).items():
+        if entry.get('kind') not in KINDS:
+            raise ValueError(f'{path}: unknown crosswalk kind {entry.get("kind")!r}')
+        crosswalk[path] = (entry['kind'], str(entry['ibge']) if entry.get('ibge') else None)
+    ad_names = {}
+    for key, code in (data.get('ad_municipalities') or {}).items():
+        uf, _, name = key.partition('/')
+        ad_names[(uf, name)] = str(code)
+    return Overrides(runs, regions, crosswalk, ad_names, version)

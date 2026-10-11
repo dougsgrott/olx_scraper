@@ -1,0 +1,53 @@
+<h2>{{ place.name }} <span class="badge">{{ place.uf }}</span> <span class="badge">DDD {{ place.ddd }}</span></h2>
+<p class="muted small">IBGE {{ place.code }}{% if place.capital %} · state capital{% endif %}</p>
+
+<dl class="facts">
+  <dt>Located here</dt><dd>{{ located | num }} ads</dd>
+</dl>
+
+<h3>OLX scopes ({{ rows | length }})</h3>
+{% if rows %}
+<table class="runs compact">
+  <thead><tr><th>Scope</th><th class="num">OLX ads</th><th>Fresh as of</th><th>Baseline</th></tr></thead>
+  <tbody>
+  {% for row in rows %}{% set s = row.s %}
+    <tr>
+      <td><a href="#" class="detail-link" hx-get="/coverage/node?path={{ s.path | urlencode }}&days={{ days }}" hx-target="#detail" title="{{ s.path }}">{{ s.name }}</a>
+        <span class="badge kind">{{ s.kind }}</span></td>
+      <td class="num">{{ s.inventory | num }}</td>
+      <td class="fr-{{ row.fresh_cls }}">{{ s.eff_at | ago if s.eff_at else 'never' }}</td>
+      <td class="bl-{{ row.baseline_cls }}">{{ row.baseline }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% elif area_macro %}
+<p class="note">No OLX scope of its own: its ads are listed under
+  <a href="#" class="detail-link" hx-get="/coverage/node?path={{ area_macro.path | urlencode }}&days={{ days }}" hx-target="#detail">{{ area_macro.name }}</a>,
+  whose freshness the map shows (faded) for it.</p>
+{% else %}
+<p class="note">OLX's location tree doesn't list this municipality or its DDD area.</p>
+{% endif %}
+
+<h3>Neighbourhoods in collected ads ({{ hoods | length }})</h3>
+{% if hoods %}
+<p class="muted small">From the ads' own location. "≈" marks a tree node whose slug only contains the name (OLX groups bairros).</p>
+<div class="scroll">
+<table class="runs compact">
+  <thead><tr><th>Neighbourhood</th><th class="num">Ads</th><th>Last new</th><th>Tree node</th></tr></thead>
+  <tbody>
+  {% for h in hoods[:200] %}
+    <tr>
+      <td>{{ h.name or '(none)' }}</td>
+      <td class="num">{{ h.n | num }}</td>
+      <td class="small">{{ h.last_seen[:10] if h.last_seen else '—' }}</td>
+      <td class="small">{% if h.match %}{{ '' if h.match[1] else '≈ ' }}<a href="#" class="detail-link" hx-get="/coverage/node?path={{ h.match[0] | urlencode }}&days={{ days }}" hx-target="#detail">{{ h.match[0].rsplit('/', 1)[-1] }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if hoods | length > 200 %}<p class="muted small">… {{ hoods | length - 200 }} more</p>{% endif %}
+{% else %}
+<p class="muted">No collected ads here yet.</p>
+{% endif %}
