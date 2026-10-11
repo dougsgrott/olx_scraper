@@ -96,3 +96,127 @@ document.addEventListener('DOMContentLoaded', () => {
   const reveal = new URLSearchParams(location.search).get('reveal');
   if (reveal && findNode(reveal.split('/')[0])) revealInTree(reveal);
 });
+
+// -- selection basket (localStorage; travels to the server only as a plan) ---
+
+const BASKET_KEY = 'olx-panel-basket';
+
+window.basket = {
+  paths() {
+    try {
+      return JSON.parse(localStorage.getItem(BASKET_KEY) || '[]');
+    } catch (e) {
+      return [];
+    }
+  },
+  save(paths) {
+    try {
+      localStorage.setItem(BASKET_KEY, JSON.stringify([...new Set(paths)]));
+    } catch (e) { /* private window: the selection just won't persist */ }
+    renderBasket();
+  },
+  add(paths) { this.save(this.paths().concat(paths)); },
+  remove(path) { this.save(this.paths().filter((p) => p !== path)); },
+  has(path) { return this.paths().includes(path); },
+  clear() { this.save([]); },
+};
+
+function renderBasket() {
+  const bar = document.getElementById('basket');
+  if (!bar) return;
+  const paths = window.basket.paths();
+  bar.hidden = paths.length === 0;
+  document.getElementById('basket-count').textContent = paths.length;
+  const list = document.getElementById('basket-list');
+  list.replaceChildren(...paths.map((p) => {
+    const li = document.createElement('li');
+    const remove = document.createElement('button');
+    remove.className = 'btn btn-small btn-ghost';
+    remove.textContent = '×';
+    remove.dataset.action = 'basket-remove';
+    remove.dataset.path = p;
+    li.append(remove, ` ${p}`);
+    return li;
+  }));
+  document.querySelectorAll('input.pick').forEach((box) => {
+    box.checked = paths.includes(box.dataset.path);
+  });
+}
+
+function previewPaths(paths) {
+  const form = document.getElementById('basket-form');
+  if (!form) return;
+  form.replaceChildren(...paths.map((p) => {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'path';
+    input.value = p;
+    return input;
+  }));
+  htmx.trigger(form, 'preview');
+}
+
+async function addFrom(url) {
+  const res = await fetch(url);
+  if (!res.ok) return;
+  const data = await res.json();
+  window.basket.add(data.paths);
+  const note = [`${data.paths.length} scope(s) added`];
+  if (data.skipped && data.skipped.length) note.push(`${data.skipped.length} off-tree URL(s) skipped`);
+  if (data.offsets) note.push(`${data.offsets} resume offset(s) dropped`);
+  flash(note.join(' · '));
+}
+
+function flash(message) {
+  const bar = document.getElementById('basket');
+  if (!bar) return;
+  let note = bar.querySelector('.flash');
+  if (!note) {
+    note = document.createElement('span');
+    note.className = 'flash muted small';
+    bar.prepend(note);
+  }
+  note.textContent = message;
+  bar.hidden = false;
+  setTimeout(() => { note.textContent = ''; renderBasket(); }, 4000);
+}
+
+document.addEventListener('change', (event) => {
+  const box = event.target.closest('input.pick');
+  if (!box) return;
+  if (box.checked) window.basket.add([box.dataset.path]);
+  else window.basket.remove(box.dataset.path);
+});
+
+document.addEventListener('click', (event) => {
+  const action = event.target.closest('[data-action]');
+  if (!action) return;
+  const days = action.dataset.days || daysParam();
+  switch (action.dataset.action) {
+    case 'basket-add': window.basket.add([action.dataset.path]); flash('Added to selection'); break;
+    case 'basket-remove': window.basket.remove(action.dataset.path); break;
+    case 'basket-clear': window.basket.clear(); break;
+    case 'basket-list': {
+      const list = document.getElementById('basket-list');
+      list.hidden = !list.hidden;
+      break;
+    }
+    case 'basket-preview': previewPaths(window.basket.paths()); break;
+    case 'preview-one': previewPaths([action.dataset.path]); break;
+    case 'basket-stale': addFrom(`/coverage/stale?days=${days}`); break;
+    case 'basket-import': addFrom('/coverage/import-run-config'); break;
+    case 'basket-add-shown':
+      window.basket.add([...document.querySelectorAll('.tree .node[data-path] > .row input.pick')]
+        .map((b) => b.dataset.path));
+      break;
+    case 'copy-urls': {
+      const text = document.getElementById('plan-urls');
+      if (text && navigator.clipboard) navigator.clipboard.writeText(text.value).then(() => flash('URLs copied'));
+      break;
+    }
+    default: break;
+  }
+});
+
+document.addEventListener('htmx:afterSwap', renderBasket);
+document.addEventListener('DOMContentLoaded', renderBasket);

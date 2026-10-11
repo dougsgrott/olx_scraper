@@ -50,7 +50,7 @@ class FakeSite:
     only their repeated content to give them away."""
 
     def __init__(self, total, page_cap=100, page_size=50, uid_base=1000000,
-                 on_goto=None, index_lies=False, payload=True, delay_s=0):
+                 on_goto=None, index_lies=False, payload=True, delay_s=0, status=200):
         self.total = total
         self.page_cap = page_cap
         self.page_size = page_size
@@ -59,6 +59,7 @@ class FakeSite:
         self.index_lies = index_lies
         self.payload = payload
         self.delay_s = delay_s
+        self.status = status
         self.requests = []
 
     def props_for(self, url):
@@ -89,7 +90,8 @@ class FakeSites:
 
 
 class FakeResponse:
-    status = 200
+    def __init__(self, status=200):
+        self.status = status
 
 
 class FakePage:
@@ -108,7 +110,7 @@ class FakePage:
             time.sleep(site.delay_s)
         self.url = url
         self._props = site.props_for(url) if site.payload else None
-        return FakeResponse()
+        return FakeResponse(site.status)
 
     def content(self):
         return page_html(self._props)

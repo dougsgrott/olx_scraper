@@ -1,0 +1,74 @@
+<div id="job-card" {% if not job.finished %}hx-get="/jobs/{{ job.id }}/card" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+  <h2>{{ label }} <span class="badge js-{{ job.state }}">{{ job.state }}</span></h2>
+  <p>{{ job.title }}</p>
+  <p class="muted small">{{ job.id }} · queued {{ job.created_at | ts }}
+    {% if job.started_at %} · started {{ job.started_at | ts }}{% endif %}
+    {% if job.finished_at %} · finished {{ job.finished_at | ts }}{% endif %}
+    {% if job.duration_s %} · {{ job.duration_s | duration }}{% endif %}
+    {% if job.exit_code is not none %} · exit {{ job.exit_code }}{% elif job.signal %} · signal {{ job.signal }}{% endif %}</p>
+  {% if job.state_reason %}<p class="note">{{ job.state_reason }}</p>{% endif %}
+
+  {% if progress and job.kind == 'scrape' and progress.url_index %}
+  <dl class="facts">
+    <dt>URL</dt><dd>{{ progress.url_index }} / {{ progress.total_urls or job.urls | length }}
+      {% if progress.current_url %}<br><span class="small muted path">{{ progress.current_url }}</span>{% endif %}</dd>
+    <dt>Page</dt><dd>{{ progress.current_page or '—' }}</dd>
+    <dt>Ads</dt><dd>{{ progress.new | num }} new · {{ progress.duplicates | num }} already seen · {{ progress.pages | num }} pages</dd>
+    {% if remaining_s %}<dt>Remaining</dt><dd>~{{ remaining_s | duration }} <span class="muted small">(estimate)</span></dd>{% endif %}
+    {% if progress.blocks %}<dt>No payload</dt><dd class="small">{% for url, status in progress.blocks %}HTTP {{ status }} at {{ url }}<br>{% endfor %}</dd>{% endif %}
+  </dl>
+  {% elif progress and job.kind == 'probe' %}
+  <p>{{ progress.probed }} node(s) probed so far.</p>
+  {% endif %}
+
+  <div class="actions">
+    {% if job.pending %}
+      <button class="btn btn-small btn-ghost" hx-post="/jobs/{{ job.id }}/cancel" hx-target="#job-card" hx-swap="outerHTML">Cancel</button>
+    {% elif job.state == 'running' and job.kind == 'warm' %}
+      <button class="btn btn-small" hx-post="/jobs/{{ job.id }}/done" hx-target="#job-card" hx-swap="outerHTML"
+              title="The listings are visible in the browser window: save the profile and close">Done — save profile</button>
+      <button class="btn btn-small btn-ghost" hx-post="/jobs/{{ job.id }}/cancel" hx-target="#job-card" hx-swap="outerHTML">Cancel</button>
+    {% elif job.state == 'running' %}
+      <button class="btn btn-small btn-ghost" hx-post="/jobs/{{ job.id }}/cancel" hx-target="#job-card" hx-swap="outerHTML"
+              title="Finish the current page, record the URL as cancelled, start no further URL">Cancel</button>
+    {% elif job.state == 'cancelling' %}
+      <button class="btn btn-small btn-danger" hx-post="/jobs/{{ job.id }}/force" hx-target="#job-card" hx-swap="outerHTML"
+              hx-confirm="Kill the job now? Rows of the page in flight may miss bronze; a browser cleanup runs next."
+              title="Kill the job group now">Force kill</button>
+    {% endif %}
+    {% if job.finished and retryable %}
+      <form class="inline" hx-post="/jobs/{{ job.id }}/retry">
+        <button class="btn btn-small">Retry {{ retryable | length }} incomplete URL(s)</button>
+        <label class="small"><input type="checkbox" name="full_pass" value="1"> as a full pass</label>
+      </form>
+    {% endif %}
+  </div>
+
+  <h3>Events</h3>
+  <ul class="events small">
+    {% for e in events %}<li><span class="muted">{{ e.ts[11:19] }}</span> {{ e.kind }}{% if e.message %} — <span class="path">{{ e.message | truncate(160) }}</span>{% endif %}</li>{% endfor %}
+  </ul>
+
+  {% if outcomes %}
+  <h3>URLs ({{ outcomes | length }})</h3>
+  <div class="scroll">
+  <table class="runs compact">
+    <thead><tr><th>Scope</th><th>Outcome</th><th class="num">Pages</th><th class="num">New</th><th class="num">Dup</th><th class="num">Took</th></tr></thead>
+    <tbody>
+    {% for o in outcomes %}{% set r = o.run %}
+      <tr title="{{ o.url.url }}">
+        <td class="small"><a href="/coverage?q={{ o.url.path | urlencode }}">{{ o.url.path.rsplit('/', 1)[-1] }}</a> <span class="muted">{{ o.url.plan_kind }}</span></td>
+        {% if r %}
+        <td><span class="chip oc-{{ r.outcome }}" title="{{ (r.stop_reason or []) | join(', ') }}">{{ r.outcome | replace('_', ' ') }}</span></td>
+        <td class="num">{{ r.pages_scraped | num }}</td><td class="num">{{ r.new_items | num }}</td>
+        <td class="num">{{ r.duplicate_items | num }}</td><td class="num">{{ r.duration_s | duration }}</td>
+        {% else %}
+        <td colspan="5" class="muted small">{{ 'not started' if job.finished else 'pending' }}</td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</div>

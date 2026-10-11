@@ -1,0 +1,47 @@
+{% set o = preview.options %}
+<h2>Scrape plan</h2>
+<form id="plan-form" hx-post="/coverage/plan" hx-target="#detail" hx-trigger="change">
+  {% for p in preview.paths %}<input type="hidden" name="path" value="{{ p }}">{% endfor %}
+  <div class="plan-options">
+    <label title="Walk every page up to OLX's page cap: for first passes and interrupted ones">
+      <input type="checkbox" name="full_pass" value="1" {% if o.full_pass %}checked{% endif %}> Full pass</label>
+    <label title="Stop after this many consecutive pages with fewer new ads than the minimum">Patience
+      <input type="number" name="patience" min="0" max="50" value="{{ o.patience }}" class="narrow" {% if o.full_pass %}title="ignored in a full pass"{% endif %}></label>
+    <label>Min new/page <input type="number" name="min_new_per_page" min="1" max="50" value="{{ o.min_new_per_page }}" class="narrow"></label>
+    <label title="0 = no limit">Max pages <input type="number" name="max_pages" min="0" max="100" value="{{ o.max_pages }}" class="narrow"></label>
+  </div>
+
+  <p class="totals"><b>{{ preview.items | length }}</b> URL(s) · ~{{ preview.pages | num }} pages ·
+    ~{{ preview.seconds | duration }} <span class="muted small">at {{ '%.1f' | format(preview.seconds_per_page) }} s/page</span></p>
+  {% if browser %}<p class="pill pill-busy">browser busy ({{ browser.label }}): the job will wait for it</p>{% endif %}
+  {% for w in preview.warnings %}<p class="pill pill-warn">{{ w }}</p>{% endfor %}
+
+  <div class="actions">
+    <button type="button" class="btn" hx-post="/jobs/scrape" hx-include="#plan-form"
+            {% if not preview.items %}disabled{% endif %}>Enqueue scrape</button>
+    <button type="submit" class="btn btn-ghost" formaction="/coverage/plan/yaml" formmethod="post"
+            {% if not preview.items %}disabled{% endif %} title="A run_config fragment for the CLI / scheduled runner">Download YAML</button>
+    <button type="button" class="btn btn-ghost" data-action="copy-urls" {% if not preview.items %}disabled{% endif %}>Copy URLs</button>
+  </div>
+</form>
+
+{% if preview.items %}
+<div class="scroll">
+<table class="runs compact">
+  <thead><tr><th>Scope</th><th>Kind</th><th class="num">OLX ads</th><th class="num">~Pages</th><th>Last run</th></tr></thead>
+  <tbody>
+  {% for i in preview.items %}
+    <tr title="{{ i.url }}">
+      <td>{{ i.name }}{% if i.queued %} <span class="badge pill-busy">queued</span>{% endif %}</td>
+      <td><span class="badge st-{{ 'leaf' if i.kind == 'leaf' else ('dense' if i.kind == 'dense' else 'split') }}">{{ i.kind }}</span></td>
+      <td class="num">{{ i.count | num }}</td>
+      <td class="num">{{ i.est_pages }}</td>
+      <td>{% if i.last_run %}<span class="dot oc-{{ i.last_run.outcome }}" title="{{ i.last_run.outcome }}"></span>{{ i.last_run.started_at | day }}{% else %}<span class="muted">never</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<textarea id="plan-urls" hidden>{% for i in preview.items %}{{ i.url }}
+{% endfor %}</textarea>
+{% endif %}

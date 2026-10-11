@@ -147,8 +147,14 @@
       map.getCanvas().style.cursor = '';
       tip.hidden = true;
     });
-    map.on('click', `fill-${level}`, (e) => {
+    map.on('click', `fill-${level}`, async (e) => {
       const key = e.features[0].properties.key;
+      if (e.originalEvent.shiftKey && window.basket) {  // Shift-click: select for a scrape
+        const res = await fetch(`/api/unit-paths?level=${level}&key=${encodeURIComponent(key)}`);
+        const paths = res.ok ? (await res.json()).paths : [];
+        if (paths.length) window.basket.add(paths);
+        return;
+      }
       select(level, key);
       const url = detailUrl(level, key);
       if (url) htmx.ajax('GET', url, { target: '#detail', swap: 'innerHTML' });
@@ -231,6 +237,7 @@
       attributionControl: false,
       dragRotate: false,
       pitchWithRotate: false,
+      boxZoom: false,  // Shift is for selecting (Shift-click adds to the basket)
     });
     map.touchZoomRotate.disableRotation();
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');

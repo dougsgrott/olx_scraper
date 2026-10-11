@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from fastapi import APIRouter
 
-PAGE_MODULES = ['coverage', 'runs']
+PAGE_MODULES = ['coverage', 'jobs', 'runs']
 
 
 @dataclass

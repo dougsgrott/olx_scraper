@@ -1,6 +1,7 @@
 """Where the panel finds the scraper's files, and its tunables. Every path is
 a field so tests can point the whole panel at a temporary tree."""
 import os
+import sys
 from dataclasses import dataclass, field
 
 from olx_patchright.plan import DEFAULT_SCOPE, DEFAULT_THRESHOLD, PAGE_CAP
@@ -37,3 +38,16 @@ class Settings:
     invocation_gap_s: float = 600.0
     host: str = '127.0.0.1'
     port: int = 8765
+    # Jobs (Phase 3): one directory per job under logs/jobs/ (gitignored)
+    jobs_dir: str = os.path.join(ROOT, 'logs', 'jobs')
+    scrape_command: tuple = (sys.executable, '-u', os.path.join(ROOT, 'run_patchright.py'))
+    probe_command: tuple = (sys.executable, '-u',
+                            os.path.join(ROOT, 'scripts', 'probe_density.py'))
+    cleanup_command: tuple = (sys.executable, '-u', '-c',
+                              'from olx_patchright.browser import clear_profile_lock; '
+                              'clear_profile_lock(); print("Browser profile freed.")')
+    supervisor_tick_s: float = 1.0
+    # cancel: SIGINT (finish the page), then SIGTERM to the group, then SIGKILL
+    cancel_grace_s: float = 60.0
+    term_grace_s: float = 15.0
+    busy_backoff_s: float = 30.0
