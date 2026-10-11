@@ -173,7 +173,8 @@ def _goto_with_retry(session, url):
 
 
 def scrape_catalog(start_urls, early_stop=None):
-    """Scrape each start URL in turn through one shared browser tab.
+    """Scrape each start URL in turn through one shared browser tab. An
+    entry may be {url, early_stop} to override early_stop for that URL.
 
     Each start URL gets its own exporter (region inferred from its path), so a
     multi-city run writes one bronze partition + manifest per region instead
@@ -194,18 +195,19 @@ def scrape_catalog(start_urls, early_stop=None):
         with sync_playwright() as p:
             session = _BrowserSession(p)
             try:
-                for start_url in start_urls:
+                for entry in start_urls:
                     if _stop_requested:
                         print(f"Stop requested: skipping the remaining "
                               f"{len(start_urls) - len(manifests)} start URL(s).")
                         break
+                    start_url, url_cfg = start_url_entry(entry, stop_cfg)
                     exporter = EncounterExporter(
                         region=infer_region(start_url), start_url=start_url,
-                        invocation_id=invocation_id, early_stop=stop_cfg,
+                        invocation_id=invocation_id, early_stop=url_cfg,
                     )
                     try:
                         reason = _scrape_from(
-                            session, start_url, factory, exporter, stop_cfg
+                            session, start_url, factory, exporter, url_cfg
                         )
                         exporter.record_stop(reason)
                     except Exception as exc:
@@ -244,6 +246,17 @@ def _note_scope_data(notes, props):
         _scope_keys_noted = True
         print(f"Note: page data — {'; '.join(notes)}. "
               f"Keys present: {', '.join(sorted(props))}")
+
+
+def start_url_entry(entry, default_cfg):
+    """A start_urls entry is a URL, or {url, early_stop} to give that URL its
+    own early-stop rules (e.g. {} — a full pass — for a scope never walked to
+    the end, inside an otherwise incremental run)."""
+    if isinstance(entry, dict):
+        cfg = _normalize_early_stop(entry['early_stop']) if 'early_stop' in entry \
+            else default_cfg
+        return entry['url'], cfg
+    return entry, default_cfg
 
 
 def _normalize_early_stop(early_stop):

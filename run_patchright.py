@@ -3,7 +3,9 @@
 Reads the same run_config.yaml as the legacy run_scrapy.py (or another file
 via --config, e.g. one generated per job by the control panel):
 
-    mode: 'CATALOG'  scrape catalogue pages (catalog_spider.start_urls)
+    mode: 'CATALOG'  scrape catalogue pages (catalog_spider.start_urls; an
+                     entry may be {url: …, early_stop: {…}} to override the
+                     early_stop block for that URL — {} means a full pass)
     mode: 'WARM'     open a headful browser to solve Cloudflare by hand
                      (warm.url, falling back to catalog_spider.start_urls[0])
 
@@ -40,6 +42,13 @@ def read_config(file_path='run_config.yaml'):
     return None
 
 
+def _valid_entry(entry):
+    if isinstance(entry, str):
+        return bool(entry)
+    return isinstance(entry, dict) and isinstance(entry.get('url'), str) and \
+        isinstance(entry.get('early_stop', {}), dict)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--config', default='run_config.yaml',
@@ -56,7 +65,10 @@ def main(argv=None):
     catalog_urls = (config.get('catalog_spider') or {}).get('start_urls') or []
 
     if mode == 'WARM':
-        url = (config.get('warm') or {}).get('url') or (catalog_urls[0] if catalog_urls else None)
+        first = catalog_urls[0] if catalog_urls else None
+        if isinstance(first, dict):
+            first = first.get('url')
+        url = (config.get('warm') or {}).get('url') or first
         if not url:
             print("Error: WARM mode needs warm.url or catalog_spider.start_urls in the config.")
             return EXIT_CONFIG
@@ -67,6 +79,11 @@ def main(argv=None):
     elif mode == 'CATALOG':
         if not isinstance(catalog_urls, list) or not catalog_urls:
             print("Error: 'catalog_spider.start_urls' (as a list) not found in the config.")
+            return EXIT_CONFIG
+        bad = [e for e in catalog_urls if not _valid_entry(e)]
+        if bad:
+            print(f"Error: start_urls entries must be URLs or {{url, early_stop}} mappings; "
+                  f"got {bad[0]!r}.")
             return EXIT_CONFIG
         early_stop = (config.get('catalog_spider') or {}).get('early_stop')
         if early_stop is not None and not isinstance(early_stop, dict):

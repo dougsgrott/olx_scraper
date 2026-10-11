@@ -4,6 +4,7 @@
     uv run python -m olx_panel --port 8800
     uv run python -m olx_panel reindex         # rebuild panel.sqlite and exit
     uv run python -m olx_panel crosswalk-report  # OLX node <-> IBGE matching gaps
+    uv run python -m olx_panel plan --due -o due.yaml   # run_config for a scheduler
 
 One worker, no --reload: the panel holds scraped_data/panel.lock and (from
 Phase 3) owns the job queue, so there must be exactly one process.
@@ -75,7 +76,55 @@ def crosswalk_report(args):
             print(f'  {item}')
 
 
-def main():
+EXIT_NOTHING = 3
+
+
+def plan(args, settings=None):
+    """Write a run_config for the CLI / scheduled runner: the scopes that are
+    due (yield x time since fresh), stale, or named — planned like the
+    panel's preview. Exits 3 when there is nothing to scrape, so a wrapper
+    can skip the run."""
+    from datetime import datetime
+    from .core import planning
+    from .core.service import PanelService
+    settings = settings or Settings()
+    service = PanelService(settings)
+    service.refresh()
+    model = service.model()
+    now = datetime.now().astimezone()
+    paths = list(args.paths)
+    if args.due:
+        paths += planning.due_paths(model, now, settings.due_new_ads, settings.fresh_days)
+    if args.stale:
+        paths += planning.stale_paths(model, args.stale, now)
+    defaults = planning.options_from_run_config(service.run_config())
+    options = planning.Options(
+        patience=defaults.patience if args.patience is None else args.patience,
+        min_new_per_page=args.min_new or defaults.min_new_per_page,
+        max_pages=defaults.max_pages if args.max_pages is None else args.max_pages,
+        mode=args.mode)
+    preview = planning.preview(model, paths, options, settings.scope)
+    for warning in preview.warnings:
+        print(f'# WARN {warning}', file=sys.stderr)
+    if not preview.items:
+        print('Nothing to scrape.', file=sys.stderr)
+        return EXIT_NOTHING
+    text = planning.plan_yaml(preview)
+    if args.output:
+        tmp = args.output + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            f.write(text)
+        os.replace(tmp, args.output)
+    else:
+        sys.stdout.write(text)
+    full = sum(1 for i in preview.items if i.full)
+    print(f'{len(preview.items)} URL(s), ~{preview.pages} pages, '
+          f'~{preview.seconds / 60:.0f} min{f", {full} full pass(es)" if full else ""}.',
+          file=sys.stderr)
+    return 0
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--port', type=int, default=Settings.port)
     sub = parser.add_subparsers(dest='command')
@@ -83,11 +132,26 @@ def main():
     sub.add_parser('reindex', help='rebuild panel.sqlite and exit').set_defaults(func=reindex)
     sub.add_parser('crosswalk-report', help='list OLX nodes / ad places the '
                    'IBGE crosswalk could not match').set_defaults(func=crosswalk_report)
-    args = parser.parse_args()
+    planner = sub.add_parser('plan', help='write a run_config for the CLI / scheduler '
+                             '(exit 3: nothing to scrape)')
+    planner.add_argument('paths', nargs='*', help='location paths to plan')
+    planner.add_argument('--due', action='store_true',
+                         help='add the plan leaves due by yield (or stale without one)')
+    planner.add_argument('--stale', type=int, metavar='DAYS',
+                         help='add plan leaves scraped before but not fresh within DAYS')
+    planner.add_argument('--mode', choices=('incremental', 'smart', 'full'),
+                         default='incremental',
+                         help='smart: full pass only where never walked to the end')
+    planner.add_argument('--patience', type=int, help='default: run_config.yaml')
+    planner.add_argument('--min-new', type=int, help='default: run_config.yaml')
+    planner.add_argument('--max-pages', type=int, help='default: run_config.yaml')
+    planner.add_argument('-o', '--output', help='write here instead of stdout')
+    planner.set_defaults(func=plan)
+    args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format='%(asctime)s %(levelname)s %(name)s: %(message)s')
-    getattr(args, 'func', serve)(args)
+    return getattr(args, 'func', serve)(args)
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

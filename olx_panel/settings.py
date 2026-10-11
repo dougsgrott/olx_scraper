@@ -32,6 +32,8 @@ class Settings:
     threshold: int = DEFAULT_THRESHOLD
     page_cap: int = PAGE_CAP
     fresh_days: int = 7
+    # a scope is due once about one catalogue page of new ads is expected
+    due_new_ads: int = 50
     refresh_interval_s: float = 15.0
     # Legacy manifests carry no invocation id; a gap longer than this between
     # one URL's end and the next one's start separates two invocations.

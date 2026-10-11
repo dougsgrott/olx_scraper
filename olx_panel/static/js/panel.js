@@ -135,7 +135,7 @@ function renderBasket() {
     remove.textContent = '×';
     remove.dataset.action = 'basket-remove';
     remove.dataset.path = p;
-    li.append(remove, ` ${p}`);
+    li.append(remove, p.startsWith('=') ? ` ${p.slice(1)} (its own URL only)` : ` ${p}`);
     return li;
   }));
   document.querySelectorAll('input.pick').forEach((box) => {
@@ -204,6 +204,7 @@ document.addEventListener('click', (event) => {
     case 'basket-preview': previewPaths(window.basket.paths()); break;
     case 'preview-one': previewPaths([action.dataset.path]); break;
     case 'basket-stale': addFrom(`/coverage/stale?days=${days}`); break;
+    case 'basket-due': addFrom('/coverage/due'); break;
     case 'basket-import': addFrom('/coverage/import-run-config'); break;
     case 'basket-add-shown':
       window.basket.add([...document.querySelectorAll('.tree .node[data-path] > .row input.pick')]

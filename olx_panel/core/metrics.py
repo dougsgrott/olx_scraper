@@ -17,6 +17,11 @@
                    ancestor: the baseline. Caught-up runs certify freshness,
                    not completeness (a remainder's first pass can stop early
                    while scattered older ads were never collected).
+  yield_per_day    new ads per day via this scope (and alias twins), over
+                   its recent credited runs after the first: each credited
+                   run collects what was posted since the one before, while
+                   a first pass collects backlog, not a rate. Ads an
+                   overlapping scope collected first count there instead.
   fresh / baseline the inventory-weighted share of the node's plan leaves
   share            that are fresh / completely walked (plan.build_plan's
                    leaf/dense/remainder split; a remainder weighs only what
@@ -39,6 +44,8 @@ from .manifests import COMPLETE, INCOMPLETE
 from .tree import UF_NAMES, title_from_slug
 
 PROBLEM_STATUSES = ('unprobed', 'padded', 'unscoped')
+# credited runs the yield is measured over (the most recent; 5 intervals)
+YIELD_RUNS = 6
 
 
 @dataclass(frozen=True)
@@ -60,6 +67,7 @@ class NodeStats:
     code: str = None          # IBGE municipality code for place kinds
     inventory: int = None
     probed_at: object = None
+    inventory_source: str = None  # 'probe' or 'run' (a scrape's page-1 count)
     alias_of: str = None
     twins: list = field(default_factory=list)
     legacy: bool = False
@@ -73,6 +81,9 @@ class NodeStats:
     eff_via: str = None
     complete_at: object = None
     complete_via: str = None
+    yield_per_day: float = None
+    yield_since: object = None  # first and last credited run of the window
+    yield_until: object = None
 
     @property
     def last_run(self):
@@ -137,7 +148,10 @@ class CoverageModel:
                 kind=place.kind if place else None,
                 code=place.code if place else None,
                 inventory=node.inventory,
-                probed_at=node.probed_at, alias_of=tree.alias_of.get(node.path),
+                probed_at=node.probed_at,
+                inventory_source=(tree.inventory_source.get(node.path, 'probe')
+                                  if node.probed_at else None),
+                alias_of=tree.alias_of.get(node.path),
                 twins=sorted(tree.twins.get(node.path, set()) - {node.path}),
                 children=[k.path for k in tree.children[node.path]],
             )
@@ -145,6 +159,7 @@ class CoverageModel:
         self._roll_up_collected()
         self._locate(ad_rows, ad_aliases or {})
         self._freshness()
+        self._yields()
         self._share_cache = {}
 
     # -- construction --------------------------------------------------------
@@ -257,6 +272,25 @@ class CoverageModel:
             stats.complete_at, stats.complete_via = _latest(
                 (own_complete, node.path),
                 (parent.complete_at, parent.complete_via) if parent else (None, None))
+
+    def _yields(self):
+        for node in self.tree.walk():
+            stats = self.stats[node.path]
+            credited = sorted((r for r in self._group_runs(stats) if r.credited),
+                              key=lambda r: r.started_at)[-YIELD_RUNS:]
+            if len(credited) < 2:
+                continue
+            days = (credited[-1].started_at - credited[0].started_at).total_seconds() / 86400
+            if days < 0.5:  # same-day reruns say nothing about a daily rate
+                continue
+            stats.yield_per_day = sum(r.new_items or 0 for r in credited[1:]) / days
+            stats.yield_since, stats.yield_until = credited[0].started_at, credited[-1].started_at
+
+    def expected_new(self, stats, now):
+        """New ads likely posted in the scope since it was last fresh."""
+        if stats.yield_per_day is None or stats.eff_at is None:
+            return None
+        return stats.yield_per_day * max(0.0, (now - stats.eff_at).total_seconds() / 86400)
 
     # -- shares (depend on the freshness window and the clock) ---------------
 

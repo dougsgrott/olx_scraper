@@ -280,6 +280,7 @@ uv run python -m olx_panel              # http://localhost:8765 (also from the W
 uv run python -m olx_panel reindex      # rebuild scraped_data/panel.sqlite (panel stopped)
 uv run python scripts/build_geo.py      # once: map assets (IBGE + DDD table) -> scraped_data/geo/
 uv run python -m olx_panel crosswalk-report   # OLX nodes / ad places the IBGE match missed
+uv run python -m olx_panel plan --due -o due.yaml   # run_config of what's due (exit 3: nothing)
 ```
 
 - **Coverage** — a map of Brazil at three levels (states, DDD areas keyed
@@ -301,12 +302,15 @@ uv run python -m olx_panel crosswalk-report   # OLX nodes / ad places the IBGE m
   aggregate or neighbourhood; renames OLX kept (Parati, Embu) and districts
   are fixed in `overrides.yaml`.
 - **Acting on it** — tick scopes in the tree, Shift-click places on the map,
-  "Select stale" (scraped before, not fresh within N days) or "Import
-  run_config", then **Preview plan**: the URLs (`plan.build_plan`: leaves,
+  "Select due" (expected to hold a page of new ads by now: the scope's
+  yield — new ads/day over its recent runs — times the days since it was
+  fresh), "Select stale" (scraped before, not fresh within N days) or
+  "Import run_config", then **Preview plan**: the URLs (`plan.build_plan`: leaves,
   dense scopes, remainders after their children, alias twins once),
-  estimated pages and time, early-stop options or a full pass (the preview
-  flags scopes never walked to their last page, whose baseline only a full
-  pass can complete). **Enqueue**
+  estimated pages and time, and a mode: early stop, full pass, or *full pass
+  where never walked to the end* (only the scopes whose baseline is
+  incomplete walk to their last page; `start_urls` entries may be
+  `{url, early_stop}` for exactly this). **Enqueue**
   it, download it as a `run_config` fragment, or copy the URLs. A node's
   details also offer **Probe counts** (the density prober on its subtree).
 - **Jobs** — the panel's queue: one browser job at a time (scrape, warm,
@@ -320,6 +324,9 @@ uv run python -m olx_panel crosswalk-report   # OLX nodes / ad places the IBGE m
   pauses the queue until you **Re-warm** and **Resume**. Job files live
   in `logs/jobs/<id>/` (generated `run_config.yaml`, `output.log`,
   `exit.json`); the panel never edits your `run_config.yaml`.
+- OLX's ad counts come from the density prober, or from a scrape's first
+  page when that is newer (every v2 manifest records it), so statuses and
+  plans follow OLX's current numbers.
 - **Runs** — every invocation found in the manifests (CLI, scheduled, later
   the panel's own), with per-URL outcomes, plus a digest of `run_config.yaml`
   that warns about `?o=` resume offsets, off-tree URLs and alias pairs.

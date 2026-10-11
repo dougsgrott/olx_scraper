@@ -174,3 +174,17 @@ def test_unreadable_breadcrumb_is_kept_raw_in_the_manifest(workdir, fast_catalog
     [m] = scrape(fast_catalog, monkeypatch, FakeSite(total=10, page_data='opaque'), [url(ES)])
     assert m['breadcrumb'] == [] and m['breadcrumb_raw'] == '["Brasil", "ES", "DDD 27"]'
     assert 'sample: ["Brasil", "ES", "DDD 27"]' in capsys.readouterr().out
+
+
+def test_a_start_url_can_carry_its_own_early_stop(workdir, fast_catalog, monkeypatch):
+    sites = FakeSites({ES: FakeSite(total=200), VIX: FakeSite(total=200, uid_base=2000000)})
+    monkeypatch.setattr(fast_catalog, 'sync_playwright', fake_sync_playwright(sites))
+    # seed both scopes so a re-run sees only duplicates
+    fast_catalog.scrape_catalog([url(ES), url(VIX)])
+    stop = {'patience': 1, 'min_new_per_page': 1}
+    es, vix = fast_catalog.scrape_catalog([url(ES), {'url': url(VIX), 'early_stop': {}}],
+                                          early_stop=stop)
+    assert (es['stop_reason'], es['pages_scraped']) == (['early_stop'], 1)
+    assert es['early_stop'] == {'patience': 1, 'min_new_per_page': 1, 'max_pages': 0}
+    assert (vix['stop_reason'], vix['pages_scraped']) == (['exhausted'], 4)  # walked to the end
+    assert vix['early_stop'] == {'patience': 0, 'min_new_per_page': 1, 'max_pages': 0}

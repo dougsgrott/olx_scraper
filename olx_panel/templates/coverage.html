@@ -62,6 +62,8 @@
   <button class="btn" type="submit">Filter</button>
   {% if filtered %}<a class="btn btn-ghost" href="/coverage?days={{ days }}">Clear → tree</a>{% endif %}
   <span class="spacer"></span>
+  <button type="button" class="btn btn-ghost" data-action="basket-due"
+          title="Scopes expected to hold a page or more of new ads by now (their yield x time since fresh); without a yield yet, those stale for {{ days }}+ days">Select due</button>
   <button type="button" class="btn btn-ghost" data-action="basket-stale" data-days="{{ days }}"
           title="Scopes scraped before that are not fresh within {{ days }} days">Select stale</button>
   <button type="button" class="btn btn-ghost" data-action="basket-import"

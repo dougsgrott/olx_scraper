@@ -126,8 +126,10 @@ def node_detail(request: Request, path: str, days: int = 0):
     now = datetime.now().astimezone()
     [row] = _rows(model, [stats], days, now)
     url = None if stats.legacy else start_url(path, svc.settings.scope)
+    expected = model.expected_new(stats, now)
     return render(request, 'partials/node_detail.html', row=row, days=days,
-                  url=url, subtree=_subtree_size(model, path),
+                  url=url, subtree=_subtree_size(model, path), expected=expected,
+                  due=expected is not None and expected >= svc.settings.due_new_ads,
                   ancestors=[model.stats[p] for p in reversed(model.tree.ancestors(path))
                              if p in model.stats])
 
@@ -241,20 +243,24 @@ def _queued_paths(request):
     return {u.path for job in sup.jobs.queue() + sup.jobs.active() for u in job.urls}
 
 
-def _plan_options(request, patience, min_new_per_page, max_pages, full_pass):
+def _plan_options(request, patience, min_new_per_page, max_pages, full_pass, mode=None):
     if patience is None:  # first preview: the user's run_config.yaml settings
-        return planning.options_from_run_config(service(request).run_config())
+        options = planning.options_from_run_config(service(request).run_config())
+        return planning.Options(options.patience, options.min_new_per_page,
+                                options.max_pages, mode=mode or planning.INCREMENTAL,
+                                full_pass=bool(full_pass))
     return planning.Options(patience=max(0, patience),
                             min_new_per_page=max(1, min_new_per_page or 1),
-                            max_pages=max(0, max_pages or 0), full_pass=bool(full_pass))
+                            max_pages=max(0, max_pages or 0), full_pass=bool(full_pass),
+                            mode=mode or planning.INCREMENTAL)
 
 
 @router.post('/coverage/plan')
 def plan_preview(request: Request, path: list[str] = Form(default=[]),
                  patience: int = Form(None), min_new_per_page: int = Form(None),
-                 max_pages: int = Form(None), full_pass: str = Form('')):
+                 max_pages: int = Form(None), full_pass: str = Form(''), mode: str = Form('')):
     svc = service(request)
-    options = _plan_options(request, patience, min_new_per_page, max_pages, full_pass)
+    options = _plan_options(request, patience, min_new_per_page, max_pages, full_pass, mode)
     preview = planning.preview(svc.model(), path, options, svc.settings.scope,
                                _queued_paths(request))
     return render(request, 'partials/plan_preview.html', preview=preview,
@@ -264,9 +270,9 @@ def plan_preview(request: Request, path: list[str] = Form(default=[]),
 @router.post('/coverage/plan/yaml')
 def plan_yaml(request: Request, path: list[str] = Form(default=[]),
               patience: int = Form(None), min_new_per_page: int = Form(None),
-              max_pages: int = Form(None), full_pass: str = Form('')):
+              max_pages: int = Form(None), full_pass: str = Form(''), mode: str = Form('')):
     svc = service(request)
-    options = _plan_options(request, patience, min_new_per_page, max_pages, full_pass)
+    options = _plan_options(request, patience, min_new_per_page, max_pages, full_pass, mode)
     preview = planning.preview(svc.model(), path, options, svc.settings.scope)
     return Response(planning.plan_yaml(preview), media_type='application/x-yaml',
                     headers={'Content-Disposition':
@@ -278,6 +284,13 @@ def stale_selection(request: Request, days: int = 0):
     svc = service(request)
     days = days if days > 0 else svc.settings.fresh_days
     return {'paths': planning.stale_paths(svc.model(), days, datetime.now().astimezone())}
+
+
+@router.get('/coverage/due')
+def due_selection(request: Request):
+    svc = service(request)
+    return {'paths': planning.due_paths(svc.model(), datetime.now().astimezone(),
+                                        svc.settings.due_new_ads, svc.settings.fresh_days)}
 
 
 @router.get('/coverage/import-run-config')

@@ -144,9 +144,10 @@ async def job_log(request: Request, job_id: str,
 
 # -- creating jobs ------------------------------------------------------------
 
-def _options(patience, min_new_per_page, max_pages, full_pass):
+def _options(patience, min_new_per_page, max_pages, full_pass, mode=None):
     return planning.Options(patience=max(0, patience), min_new_per_page=max(1, min_new_per_page),
-                            max_pages=max(0, max_pages), full_pass=bool(full_pass))
+                            max_pages=max(0, max_pages), full_pass=bool(full_pass),
+                            mode=mode or planning.INCREMENTAL)
 
 
 def create_scrape(request, paths, options, title=None):
@@ -158,17 +159,22 @@ def create_scrape(request, paths, options, title=None):
     more = f' +{len(preview.items) - 3}' if len(preview.items) > 3 else ''
     urls = [JobUrl(i, item.path, item.url, item.kind, item.est_pages)
             for i, item in enumerate(preview.items)]
+    full = [i.path for i in preview.items if i.full]
+    if full and options.mode == planning.SMART:
+        more += f' ({len(full)} full)'
     return supervisor(request).enqueue(
         kinds.SCRAPE, title or f'{len(urls)} URL(s): {names}{more}',
         {'paths': preview.paths, 'early_stop': options.early_stop,
-         'full_pass': options.full_pass}, urls)
+         'full_pass': options.full_pass, 'mode': options.mode, 'full_paths': full}, urls)
 
 
 @router.post('/jobs/scrape')
 def enqueue_scrape(request: Request, path: list[str] = Form(default=[]),
                    patience: int = Form(4), min_new_per_page: int = Form(5),
-                   max_pages: int = Form(0), full_pass: str = Form('')):
-    job = create_scrape(request, path, _options(patience, min_new_per_page, max_pages, full_pass))
+                   max_pages: int = Form(0), full_pass: str = Form(''),
+                   mode: str = Form('')):
+    job = create_scrape(request, path,
+                        _options(patience, min_new_per_page, max_pages, full_pass, mode))
     return _redirect(f'/jobs/{job.id}')
 
 
@@ -243,6 +249,8 @@ def retry_job(request: Request, job_id: str, full_pass: str = Form('')):
     options = planning.Options(patience=stop.get('patience', 4),
                                min_new_per_page=stop.get('min_new_per_page', 5),
                                max_pages=stop.get('max_pages', 0),
+                               mode=planning.FULL if full_pass
+                               else job.params.get('mode', planning.INCREMENTAL),
                                full_pass=bool(full_pass) or job.params.get('full_pass', False))
     new = create_scrape(request, paths, options,
                         title=f'Retry of {job.id}: {len(paths)} URL(s)')

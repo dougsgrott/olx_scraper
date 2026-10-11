@@ -24,7 +24,7 @@ from .overrides import load_overrides
 from .runconfig import summarize_run_config
 from .sources import file_version
 from .store import Store
-from .tree import load_tree
+from .tree import load_tree, with_run_counts
 
 log = logging.getLogger(__name__)
 
@@ -107,6 +107,7 @@ class PanelService:
                 runs = interpret(load_runs(self.store), tree.nodes,
                                  self.settings.page_cap, overrides,
                                  self.settings.invocation_gap_s)
+                tree = with_run_counts(tree, runs)
                 with self.store.connect() as conn:
                     ad_count = int(self.store.get_meta(conn, 'ad_count', 0))
                 gazetteer = self.gazetteer()
