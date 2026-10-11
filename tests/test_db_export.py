@@ -1,9 +1,12 @@
 import json
 import sqlite3
 
+import pytest
+
 from olx_patchright import db
 from olx_patchright.export import (
-    EncounterExporter, infer_region, infer_scope, start_page_of,
+    EncounterExporter, infer_region, infer_scope, parse_breadcrumb, parse_sort,
+    start_page_of,
 )
 
 
@@ -84,3 +87,40 @@ def test_same_region_twice_in_one_second_gets_distinct_run_ids(workdir):
     assert one['run_id'] != two['run_id']
     manifests = sorted((workdir / 'runs' / 'manifests').rglob('manifest_*.json'))
     assert len(manifests) == 2
+
+
+JULY = {'locations': [
+    {'level': 'region', 'value': '27', 'label': 'DDD 27 - Norte do Espírito Santo',
+     'url': '/imoveis/aluguel/estado-es/norte-do-espirito-santo', 'extra': 1}]}
+
+
+def test_breadcrumb_july_layout():
+    entries, raw, notes = parse_breadcrumb(JULY)
+    assert entries == [{'level': 'region', 'value': '27',
+                        'label': 'DDD 27 - Norte do Espírito Santo',
+                        'url': '/imoveis/aluguel/estado-es/norte-do-espirito-santo'}]
+    assert raw is None and notes == []
+
+
+@pytest.mark.parametrize('field', [
+    [{'name': 'Vitória', 'href': 'https://www.olx.com.br/imoveis/aluguel/estado-es/x/vitoria'}],
+    {'items': [{'text': 'Vitória', 'link': '/imoveis/aluguel/estado-es/x/vitoria', 'id': 9}]},
+])
+def test_breadcrumb_renamed_keys_are_read(field):
+    entries, raw, notes = parse_breadcrumb({'breadcrumbs': field})
+    assert entries[0]['label'] == 'Vitória' and entries[0]['url'].endswith('/vitoria')
+    assert raw is None and notes == []
+
+
+def test_breadcrumb_unreadable_shape_keeps_a_raw_sample():
+    entries, raw, notes = parse_breadcrumb({'breadcrumbs': ['Brasil', 'ES']})
+    assert entries == [] and raw == '["Brasil", "ES"]'
+    assert 'no recognisable label/url' in notes[0]
+    assert parse_breadcrumb({})[2] == [
+        'no location breadcrumb (neither `locations` nor `breadcrumbs`)']
+
+
+def test_sort_is_read_by_any_known_key():
+    assert parse_sort({'filters': {'sort': 'date'}}) == ('date', [])
+    assert parse_sort({'filters': {'sf': '1'}}) == ('1', [])
+    assert parse_sort({'filters': {'state': '14'}}) == (None, ['no sort in `filters` (keys: state)'])
