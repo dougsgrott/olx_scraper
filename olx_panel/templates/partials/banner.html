@@ -1,9 +1,18 @@
 {% set b = status.browser %}
-<span class="pill {{ 'pill-busy' if b else 'pill-ok' }}"
-      title="{% if b %}{{ b.argv | join(' ') if b.argv else '' }}{% endif %}">
-  {% if b %}browser busy: {{ b.label or 'unknown' }} (pid {{ b.pid }}){% if b.since %} since {{ b.since[11:16] }}{% endif %}
-  {% else %}browser free{% endif %}
-</span>
+{% if queue.running %}
+<a class="pill pill-busy" href="/jobs/{{ queue.running.id }}" title="{{ queue.running.title }}">job {{ queue.running.state }}: {{ queue.running.title | truncate(36) }}</a>
+{% elif b %}
+<span class="pill pill-busy" title="{{ b.argv | join(' ') if b.argv else '' }}">browser busy: {{ b.label or 'unknown' }} (pid {{ b.pid }}){% if b.since %} since {{ b.since[11:16] }}{% endif %}</span>
+{% else %}
+<span class="pill pill-ok">browser free</span>
+{% endif %}
+{% if queue.queued %}<a class="pill" href="/jobs">{{ queue.queued }} queued</a>{% endif %}
+{% if queue.paused %}
+<span class="pill pill-bad" title="{{ queue.paused }}">queue paused</span>
+<button class="btn btn-small" hx-post="/jobs/warm" title="Open the profile to solve the Cloudflare challenge">Re-warm</button>
+<button class="btn btn-small btn-ghost" hx-post="/queue/resume" hx-swap="none">Resume</button>
+{% endif %}
+{% if queue.error %}<span class="pill pill-bad" title="{{ queue.error }}">job runner error</span>{% endif %}
 {% if not status.display %}
 <span class="pill pill-warn" title="Browser jobs need WSLg's DISPLAY/WAYLAND_DISPLAY">no display</span>
 {% endif %}

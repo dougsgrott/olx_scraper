@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}{{ job.id }} · OLX panel{% endblock %}
+{% block head %}<script src="/static/js/jobs.js" defer></script>{% endblock %}
+{% block main %}
+<p class="small"><a href="/jobs">← Jobs</a></p>
+<div class="split-view">
+  <section class="card">
+    <h3>Output</h3>
+    <pre id="job-log" class="log" data-stream="/jobs/{{ job.id }}/log/stream" aria-live="polite"></pre>
+  </section>
+  <aside class="detail">
+    {% include 'partials/job_card.html' %}
+  </aside>
+</div>
+{% endblock %}

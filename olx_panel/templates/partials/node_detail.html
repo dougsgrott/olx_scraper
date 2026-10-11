@@ -10,6 +10,15 @@
   {% if not s.legacy %}<button class="btn btn-small btn-ghost" data-action="map" data-path="{{ s.path }}">Show on map</button>{% endif %}
   {% if s.code %}<a href="#" class="btn btn-small btn-ghost detail-link" hx-get="/coverage/muni?code={{ s.code }}&days={{ days }}" hx-target="#detail">Municipality</a>{% endif %}
 </p>
+{% if not s.legacy %}
+<p class="actions">
+  <button class="btn btn-small" data-action="basket-add" data-path="{{ s.path }}">Add to selection</button>
+  <button class="btn btn-small btn-ghost" data-action="preview-one" data-path="{{ s.path }}">Plan a scrape</button>
+  <button class="btn btn-small btn-ghost" hx-post="/jobs/probe" hx-vals='{"path": "{{ s.path }}"}'
+          hx-confirm="Probe OLX counts under {{ s.name }}? The prober loads page 1 of each node it walks ({{ subtree.unprobed }} of {{ subtree.size }} nodes here are unprobed; it descends only into scopes over the threshold)."
+          title="Refresh OLX's ad counts (density prober) for this subtree; cached counts are kept">Probe counts</button>
+</p>
+{% endif %}
 {% if s.legacy %}
 <p class="note">Off-tree legacy scope: a hand-written start URL OLX accepted but its sitemap doesn't list. Its ads count under
   <b>{{ s.parent_path }}</b>; its runs earn no freshness, because what it actually filtered is unknown.</p>

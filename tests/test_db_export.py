@@ -72,3 +72,15 @@ def test_all_duplicate_run_keeps_only_its_manifest(workdir):
     assert json.loads(only.read_text()) == manifest
     assert (manifest['new_items'], manifest['duplicate_items']) == (0, 1)
     assert manifest['start_url'] is None and manifest['scope'] is None
+
+
+def test_same_region_twice_in_one_second_gets_distinct_run_ids(workdir):
+    first = EncounterExporter('estado-es')
+    first.record_stop('no_payload')
+    one = first.close()
+    second = EncounterExporter('estado-es')
+    second.record_stop('exhausted')
+    two = second.close()
+    assert one['run_id'] != two['run_id']
+    manifests = sorted((workdir / 'runs' / 'manifests').rglob('manifest_*.json'))
+    assert len(manifests) == 2

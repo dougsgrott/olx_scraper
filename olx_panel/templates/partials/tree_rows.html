@@ -2,6 +2,7 @@
 <div class="node" data-path="{{ s.path }}" style="--depth: {{ 0 if flat else s.depth - 1 }}">
   <div class="row">
     <span class="name">
+      {% if not s.legacy %}<input type="checkbox" class="pick" data-path="{{ s.path }}" aria-label="Select {{ s.name }}">{% else %}<span class="toggle-spacer"></span>{% endif %}
       {% if s.children and not flat %}
       <button class="toggle" aria-label="Expand {{ s.name }}" aria-expanded="false"
               onclick="toggleNode(this)">▸</button>

@@ -1,0 +1,45 @@
+<div id="jobs-table" hx-get="/jobs/table" hx-trigger="every 3s" hx-swap="outerHTML">
+  {% if paused %}
+  <p class="note">Queue paused: {{ paused }}
+    <button class="btn btn-small" hx-post="/jobs/warm">Re-warm</button>
+    <button class="btn btn-small btn-ghost" hx-post="/queue/resume" hx-target="#jobs-table" hx-swap="outerHTML">Resume queue</button></p>
+  {% endif %}
+
+  <h3>Running</h3>
+  {% if running %}
+  <table class="runs">
+    <tbody>{% for job in running %}
+      <tr><td><a href="/jobs/{{ job.id }}">{{ job.title }}</a></td><td>{{ labels[job.kind] }}</td>
+        <td><span class="badge js-{{ job.state }}">{{ job.state }}</span></td>
+        <td class="num">{{ job.duration_s | duration }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="muted">Nothing running.</p>{% endif %}
+
+  <h3>Queue ({{ queue | length }})</h3>
+  {% if queue %}
+  <table class="runs">
+    <tbody>{% for job in queue %}
+      <tr><td><a href="/jobs/{{ job.id }}">{{ job.title }}</a></td><td>{{ labels[job.kind] }}</td>
+        <td><span class="badge js-{{ job.state }}">{{ job.state }}</span>
+          {% if job.state_reason %}<span class="muted small">{{ job.state_reason }}</span>{% endif %}</td>
+        <td class="actions-cell">
+          {% if not loop.first %}<button class="btn btn-small btn-ghost" hx-post="/jobs/{{ job.id }}/run-next" hx-target="#jobs-table" hx-swap="outerHTML">Run next</button>{% endif %}
+          <button class="btn btn-small btn-ghost" hx-post="/jobs/{{ job.id }}/cancel" hx-swap="none">Cancel</button>
+        </td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="muted">Empty. Select scopes on the Coverage page and preview a plan.</p>{% endif %}
+
+  <h3>History</h3>
+  {% if history %}
+  <table class="runs">
+    <thead><tr><th>Job</th><th>Kind</th><th>State</th><th>Finished</th><th class="num">Took</th></tr></thead>
+    <tbody>{% for job in history %}
+      <tr><td><a href="/jobs/{{ job.id }}">{{ job.title }}</a></td><td>{{ labels[job.kind] }}</td>
+        <td><span class="badge js-{{ job.state }}" title="{{ job.state_reason or '' }}">{{ job.state }}</span></td>
+        <td>{{ job.finished_at | ts }}</td><td class="num">{{ job.duration_s | duration }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="muted">No finished jobs yet.</p>{% endif %}
+</div>

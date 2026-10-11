@@ -31,8 +31,9 @@ Ads are not tracked over time — no price history, no "still online" checks.
 ├── olx_scrapy/           # LEGACY Scrapy project (catalog + ad spiders, SQLAlchemy models)
 │
 ├── olx_panel/            # local web control panel (python -m olx_panel) — see docs/CONTROL_PANEL.md
-│   ├── core/             #   manifests index, ad aggregate, location tree, metrics, IBGE crosswalk, map data
-│   ├── web/              #   FastAPI routes per page (Coverage, Runs)
+│   ├── core/             #   manifests index, ad aggregate, location tree, metrics, IBGE crosswalk, map data,
+│   │                     #   scrape planning, jobs/ (queue, wrapper, Supervisor)
+│   ├── web/              #   FastAPI routes per page (Coverage, Jobs, Runs)
 │   ├── templates/ static/#   Jinja2 + htmx + MapLibre + topojson-client (vendored, pinned; no npm)
 │   └── overrides.yaml    #   hand-kept corrections (legacy runs, off-tree regions, crosswalk fixes)
 │
@@ -295,6 +296,24 @@ uv run python -m olx_panel crosswalk-report   # OLX nodes / ad places the IBGE m
   structure (`olx_panel/core/geo.py`): city, district, capital zone,
   aggregate or neighbourhood; renames OLX kept (Parati, Embu) and districts
   are fixed in `overrides.yaml`.
+- **Acting on it** — tick scopes in the tree, Shift-click places on the map,
+  "Select stale" (scraped before, not fresh within N days) or "Import
+  run_config", then **Preview plan**: the URLs (`plan.build_plan`: leaves,
+  dense scopes, remainders after their children, alias twins once),
+  estimated pages and time, early-stop options or a full pass. **Enqueue**
+  it, download it as a `run_config` fragment, or copy the URLs. A node's
+  details also offer **Probe counts** (the density prober on its subtree).
+- **Jobs** — the panel's queue: one browser job at a time (scrape, warm,
+  probe, browser cleanup), each in its own process via a small wrapper
+  (`olx_panel/core/jobs/wrap.py`), so closing or restarting the panel
+  never stops a job — the next panel reattaches. Live log, per-URL
+  outcomes, Cancel (finish the page; after 60 s SIGTERM, then Force kill +
+  an automatic browser cleanup), Done for a warm-up, Retry incomplete.
+  A run started outside the panel (CLI, scheduler) holds the browser lock:
+  queued jobs wait for it. An HTTP 403 (Cloudflare) cancels the job and
+  pauses the queue until you **Re-warm** and **Resume**. Job files live
+  in `logs/jobs/<id>/` (generated `run_config.yaml`, `output.log`,
+  `exit.json`); the panel never edits your `run_config.yaml`.
 - **Runs** — every invocation found in the manifests (CLI, scheduled, later
   the panel's own), with per-URL outcomes, plus a digest of `run_config.yaml`
   that warns about `?o=` resume offsets, off-tree URLs and alias pairs.

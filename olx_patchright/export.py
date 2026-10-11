@@ -18,6 +18,7 @@ readers of the manifests never see half-written JSON.
 import gzip
 import json
 import os
+import time
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 
@@ -68,10 +69,17 @@ class EncounterExporter:
 
     def __init__(self, region, start_url=None, invocation_id=None,
                  early_stop=None):
-        self._start_time = _now()
-        self._run_id = self._start_time.strftime('%Y%m%dT%H%M%S')
-        self._dt = self._start_time.strftime('%Y-%m-%d')
         self._region = region
+        # run_id has one-second resolution: a second run of the same region
+        # within that second (a blocked URL ends instantly, then a retry)
+        # would overwrite the first's files — wait for a fresh second.
+        while True:
+            self._start_time = _now()
+            self._run_id = self._start_time.strftime('%Y%m%dT%H%M%S')
+            self._dt = self._start_time.strftime('%Y-%m-%d')
+            if not self._taken():
+                break
+            time.sleep(0.2)
         self._start_url = start_url
         self._invocation_id = invocation_id
         self._early_stop = early_stop
@@ -96,6 +104,14 @@ class EncounterExporter:
             manifest_dir, f'manifest_{self._run_id}.json'
         )
         self._file = gzip.open(self._jsonl_path + '.tmp', 'wt', encoding='utf-8')
+
+    def _taken(self):
+        base = os.path.join('runs', 'manifests', 'spider=catalog', f'dt={self._dt}',
+                            f'region={self._region}', f'manifest_{self._run_id}')
+        data = os.path.join('runs', 'spider=catalog', f'dt={self._dt}',
+                            f'region={self._region}', f'{self._run_id}.jsonl.gz')
+        return any(os.path.exists(p) for p in (base + '.json', base + '.json.tmp',
+                                               data, data + '.tmp'))
 
     def write_new(self, record):
         self._new_items += 1

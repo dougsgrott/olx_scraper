@@ -68,16 +68,23 @@ def home():
     return RedirectResponse('/coverage', status_code=307)
 
 
-@router.get('/partials/banner')
-def banner(request: Request, v: str = ''):
+def supervisor(request):
+    return request.app.state.supervisor
+
+
+def _banner(request, page_version=''):
     status = service(request).status()
     return render(request, 'partials/banner.html', status=status,
-                  stale_page=bool(v) and v != status['version'])
+                  queue=supervisor(request).status(),
+                  stale_page=bool(page_version) and page_version != status['version'])
+
+
+@router.get('/partials/banner')
+def banner(request: Request, v: str = ''):
+    return _banner(request, v)
 
 
 @router.post('/admin/refresh')
-def refresh(request: Request):
-    svc = service(request)
-    svc.refresh()
-    return render(request, 'partials/banner.html', status=svc.status(),
-                  stale_page=True)
+def refresh(request: Request, v: str = ''):
+    service(request).refresh()
+    return _banner(request, v or 'refreshed')

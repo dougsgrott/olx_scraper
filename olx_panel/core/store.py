@@ -2,15 +2,15 @@
 aggregate, watermarks). Deleting the file loses nothing — it is rebuilt from
 the scraper's files on the next start.
 
-Migrations are numbered SQL files applied in order, tracked by
-PRAGMA user_version; schema.sql is migration 1.
+Migrations are SQL files applied in order, tracked by PRAGMA user_version:
+schema.sql (1), jobs.sql (2).
 """
 import os
 import sqlite3
 from contextlib import contextmanager
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MIGRATIONS = ['schema.sql']
+MIGRATIONS = ['schema.sql', 'jobs.sql']
 
 
 class Store:

@@ -61,6 +61,11 @@
   <label><input type="checkbox" name="incomplete" value="1" {% if filters.incomplete %}checked{% endif %}> last run incomplete</label>
   <button class="btn" type="submit">Filter</button>
   {% if filtered %}<a class="btn btn-ghost" href="/coverage?days={{ days }}">Clear → tree</a>{% endif %}
+  <span class="spacer"></span>
+  <button type="button" class="btn btn-ghost" data-action="basket-stale" data-days="{{ days }}"
+          title="Scopes scraped before that are not fresh within {{ days }} days">Select stale</button>
+  <button type="button" class="btn btn-ghost" data-action="basket-import"
+          title="The scopes run_config.yaml scrapes (resume offsets dropped)">Import run_config</button>
 </form>
 
 <div class="split-view" data-days="{{ days }}">
@@ -100,9 +105,20 @@
       <span class="num" title="Share of this node's plan-leaf inventory fresh within {{ days }} days">Fresh</span>
       <span title="Ever walked completely (here, above, or per plan leaf)">Baseline</span>
     </div>
+    {% if filtered and rows %}
+    <div class="row flat-actions"><span><button type="button" class="btn btn-small btn-ghost" data-action="basket-add-shown">Add all {{ rows | length }} to selection</button></span></div>
+    {% endif %}
     {% with flat = filtered %}{% include 'partials/tree_rows.html' %}{% endwith %}
     {% if not rows %}<p class="empty">{{ 'Nothing matches.' if filtered else 'No location tree yet — run scripts/discover_locations.py.' }}</p>{% endif %}
   </section>
+  </div>
+  <div id="basket" class="basket" hidden>
+    <span><b id="basket-count">0</b> scope(s) selected</span>
+    <button type="button" class="btn btn-small" data-action="basket-preview">Preview plan</button>
+    <button type="button" class="btn btn-small btn-ghost" data-action="basket-list">List</button>
+    <button type="button" class="btn btn-small btn-ghost" data-action="basket-clear">Clear</button>
+    <ul id="basket-list" class="small" hidden></ul>
+    <form id="basket-form" hx-post="/coverage/plan" hx-target="#detail" hx-trigger="preview"></form>
   </div>
   <aside id="detail" class="detail" aria-live="polite">
     <p class="muted">Select a node in the tree or a place on the map.</p>

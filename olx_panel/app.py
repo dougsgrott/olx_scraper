@@ -10,6 +10,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .core.jobs.runner import Supervisor
 from .core.service import PanelService, Refresher
 from .security import ALLOWED_HOSTS, OriginGuard
 from .settings import PACKAGE_DIR, Settings
@@ -46,11 +47,17 @@ def create_app(settings=None, background=True):
         service.refresh()
         app.state.service = service
         refresher = Refresher(service, settings.refresh_interval_s)
+        supervisor = Supervisor(service)
+        app.state.supervisor = supervisor
         if background:
             refresher.start()
+            supervisor.start()
         try:
             yield
         finally:
+            # Jobs run in their own sessions: stopping the panel never stops
+            # them; the next panel reattaches.
+            supervisor.stop()
             refresher.stop()
             os.close(lock_fd)
 
