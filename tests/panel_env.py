@@ -13,6 +13,11 @@ Tree (threshold 5000):
       macro-b 900 leaf ── cidade 300
       macro-c unprobed
     estado-yy 100 leaf
+
+With geo=True a gazetteer (scraped_data/geo/municipios.csv) names XX's
+capital "Capital" (DDD 11; centro and zona-sul are its zones), "Cidade"
+(DDD 12, macro-b/cidade) and "Serra" (DDD 11, no node of its own), and YY's
+"Ypsilon".
 """
 import json
 import os
@@ -93,15 +98,37 @@ def v2(start_url, invocation='cli-test', start_page=1, listing_url=None, **field
                 breadcrumb=fields.pop('breadcrumb', None), **fields)
 
 
-def build(root, now=None):
+GAZETTEER = [
+    ('1000001', 'Capital', 'XX', '11', '1'),
+    ('1000002', 'Cidade', 'XX', '12', '0'),
+    ('1000003', 'Serra', 'XX', '11', '0'),
+    ('2000001', 'Ypsilon', 'YY', '22', '1'),
+]
+
+
+def write_geo(root):
+    geo_dir = os.path.join(root, 'scraped_data', 'geo')
+    os.makedirs(geo_dir, exist_ok=True)
+    with open(os.path.join(geo_dir, 'municipios.csv'), 'w', encoding='utf-8') as f:
+        f.write('code,name,uf,ddd,capital,lat,lon\n')
+        for code, name, uf, ddd, capital in GAZETTEER:
+            f.write(f'{code},{name},{uf},{ddd},{capital},0,0\n')
+    with open(os.path.join(geo_dir, 'br-municipios.topo.json'), 'w') as f:
+        json.dump({'type': 'Topology', 'arcs': [], 'objects': {'municipios': {
+            'type': 'GeometryCollection', 'geometries': []}}}, f)
+
+
+def build(root, now=None, geo=False):
     """Create the whole environment; returns (Settings, paths of interest)."""
     now = now or datetime.now().astimezone()
     os.makedirs(os.path.join(root, 'scraped_data'), exist_ok=True)
     write_locations(os.path.join(root, 'scraped_data', 'locations.sqlite'))
     write_ads(os.path.join(root, 'scraped_data', 'olx.sqlite'),
-              [('XX', '11', 'macro-a', 'Cidade A', 'Centro')] * 7 +
-              [('XX', '11', 'macro-b', 'Cidade B', '')] * 3 +
-              [('YY', '22', 'yy-macro', 'Cidade Y', 'Bairro')] * 2)
+              [('XX', '11', 'macro-a', 'Capital', 'Centro')] * 7 +
+              [('XX', '12', 'macro-b', 'Cidade', '')] * 3 +
+              [('YY', '22', 'yy-macro', 'Ypsilon', 'Bairro')] * 2)
+    if geo:
+        write_geo(root)
     base = 'https://www.olx.com.br/imoveis/aluguel/'
     paths = {}
     # caught up on zona-sul 2 days ago: certifies its whole subtree
@@ -153,6 +180,8 @@ def build(root, now=None):
         panel_db=os.path.join(root, 'scraped_data', 'panel.sqlite'),
         panel_lock=os.path.join(root, 'scraped_data', 'panel.lock'),
         run_config=run_config, overrides=overrides,
+        geo_topology=os.path.join(root, 'scraped_data', 'geo', 'br-municipios.topo.json'),
+        geo_csv=os.path.join(root, 'scraped_data', 'geo', 'municipios.csv'),
         runs_dirs=(('outbox', os.path.join(root, 'runs')),
                    ('archive', os.path.join(root, 'runs_uploaded'))),
     )

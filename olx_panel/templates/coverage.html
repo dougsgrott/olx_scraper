@@ -1,5 +1,11 @@
 {% extends 'base.html' %}
 {% block title %}Coverage · OLX panel{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="/static/vendor/maplibre-gl-4.7.1/maplibre-gl.css">
+  <script src="/static/vendor/maplibre-gl-4.7.1/maplibre-gl.js" defer></script>
+  <script src="/static/vendor/topojson-client-3.1.0/topojson-client.min.js" defer></script>
+  <script src="/static/js/map.js" defer></script>
+{% endblock %}
 {% block main %}
 <section class="kpis">
   <div class="kpi">
@@ -57,7 +63,31 @@
   {% if filtered %}<a class="btn btn-ghost" href="/coverage?days={{ days }}">Clear → tree</a>{% endif %}
 </form>
 
-<div class="split-view">
+<div class="split-view" data-days="{{ days }}">
+  <div class="main-col">
+  <section class="map-card" aria-label="Map">
+    <div class="map-toolbar">
+      <div class="seg" role="group" aria-label="Map level">
+        <button type="button" data-level="uf" class="on">States</button><button type="button" data-level="area">DDD areas</button><button type="button" data-level="muni">Municipalities</button>
+      </div>
+      <label>Show
+        <select id="map-metric">
+          {% for key, label in metrics.items() %}<option value="{{ key }}">{{ label }}{% if key == 'fresh' %} ≤ {{ days }} d{% endif %}</option>{% endfor %}
+        </select>
+      </label>
+      <div id="map-legend" class="legend" aria-live="polite"></div>
+    </div>
+    {% if map_ready %}
+    <div class="map-wrap">
+      <div id="map" class="map" data-days="{{ days }}"></div>
+      <div id="map-tip" class="map-tip" hidden></div>
+    </div>
+    {% else %}
+    <p class="empty">No map yet: run <code>uv run python scripts/build_geo.py</code> once (downloads the IBGE municipality
+      boundaries and the DDD table into scraped_data/geo/), then reload.</p>
+    {% endif %}
+  </section>
+
   <section class="tree {{ 'flat' if filtered }}" aria-label="{{ 'Matching nodes' if filtered else 'Location tree' }}">
     <div class="row head">
       <span>{{ 'Node (' ~ rows|length ~ (' of more — narrow the filter' if truncated else '') ~ ')' if filtered else 'Location' }}</span>
@@ -73,8 +103,9 @@
     {% with flat = filtered %}{% include 'partials/tree_rows.html' %}{% endwith %}
     {% if not rows %}<p class="empty">{{ 'Nothing matches.' if filtered else 'No location tree yet — run scripts/discover_locations.py.' }}</p>{% endif %}
   </section>
+  </div>
   <aside id="detail" class="detail" aria-live="polite">
-    <p class="muted">Select a node to see its runs.</p>
+    <p class="muted">Select a node in the tree or a place on the map.</p>
   </aside>
 </div>
 {% endblock %}

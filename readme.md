@@ -31,13 +31,14 @@ Ads are not tracked over time — no price history, no "still online" checks.
 ├── olx_scrapy/           # LEGACY Scrapy project (catalog + ad spiders, SQLAlchemy models)
 │
 ├── olx_panel/            # local web control panel (python -m olx_panel) — see docs/CONTROL_PANEL.md
-│   ├── core/             #   manifests index, ad aggregate, location tree, coverage metrics (no web imports)
+│   ├── core/             #   manifests index, ad aggregate, location tree, metrics, IBGE crosswalk, map data
 │   ├── web/              #   FastAPI routes per page (Coverage, Runs)
-│   ├── templates/ static/#   Jinja2 + htmx (vendored, pinned; no npm)
-│   └── overrides.yaml    #   hand-kept corrections (legacy resume runs, off-tree regions)
+│   ├── templates/ static/#   Jinja2 + htmx + MapLibre + topojson-client (vendored, pinned; no npm)
+│   └── overrides.yaml    #   hand-kept corrections (legacy runs, off-tree regions, crosswalk fixes)
 │
 ├── scripts/
 │   ├── pipeline.py            # cloud pipeline: bronze upload, silver/gold Athena transforms, verify
+│   ├── build_geo.py           # map assets: IBGE municipality mesh + DDD table -> scraped_data/geo/
 │   ├── discover_locations.py  # harvest OLX's location tree from its sitemaps -> locations.sqlite
 │   ├── probe_density.py       # per-node ad counts (totalOfAds) over the tree; --report prints it
 │   ├── generate_start_urls.py # start-URL plan (leaf/dense/remainder) from the probed counts
@@ -272,9 +273,16 @@ OLX's live inventory, when it was last scraped and whether that run counts.
 ```bash
 uv run python -m olx_panel              # http://localhost:8765 (also from the Windows browser)
 uv run python -m olx_panel reindex      # rebuild scraped_data/panel.sqlite (panel stopped)
+uv run python scripts/build_geo.py      # once: map assets (IBGE + DDD table) -> scraped_data/geo/
+uv run python -m olx_panel crosswalk-report   # OLX nodes / ad places the IBGE match missed
 ```
 
-- **Coverage** — the location tree (lazy, expand per node) with *Collected*
+- **Coverage** — a map of Brazil at three levels (states, DDD areas keyed
+  `UF-DDD`, municipalities) coloured by *Ads located*, *Fresh share*, *Ever
+  fully walked*, *Freshness age*, *OLX ads* or *Collected*; hover for values,
+  click for details, "Show on map" / "Show in tree" link map and tree.
+  Municipalities without an OLX scope of their own inherit their DDD area's
+  freshness (drawn faint). Below it, the location tree (lazy, expand per node) with *Collected*
   (Σ manifest `new_items`: ads first collected via that scope and below),
   *Located* (ads whose own `uf`/macro-region is there), *OLX ads* (prober
   count), *Last run*, *Fresh as of* (latest run that walked to the end or
@@ -282,6 +290,11 @@ uv run python -m olx_panel reindex      # rebuild scraped_data/panel.sqlite (pan
   the node's plan-leaf inventory fresh within N days) and *Baseline* (ever
   walked completely). Filters switch to a flat list. Click a node for its run
   history.
+- The map needs `scripts/build_geo.py` once (no browser: IBGE and GitHub
+  serve plain HTTP). OLX nodes are matched to IBGE municipalities by name and
+  structure (`olx_panel/core/geo.py`): city, district, capital zone,
+  aggregate or neighbourhood; renames OLX kept (Parati, Embu) and districts
+  are fixed in `overrides.yaml`.
 - **Runs** — every invocation found in the manifests (CLI, scheduled, later
   the panel's own), with per-URL outcomes, plus a digest of `run_config.yaml`
   that warns about `?o=` resume offsets, off-tree URLs and alias pairs.

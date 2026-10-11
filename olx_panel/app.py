@@ -6,6 +6,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -57,6 +58,7 @@ def create_app(settings=None, background=True):
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings = settings
     app.state.pages = load_pages()
+    app.add_middleware(GZipMiddleware, minimum_size=2048)
     app.add_middleware(OriginGuard)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.mount('/static', StaticFiles(directory=os.path.join(PACKAGE_DIR, 'static')),

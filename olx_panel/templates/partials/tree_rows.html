@@ -1,15 +1,15 @@
 {% for row in rows %}{% set s = row.s %}{% set share = row.share %}
-<div class="node" style="--depth: {{ 0 if flat else s.depth - 1 }}">
+<div class="node" data-path="{{ s.path }}" style="--depth: {{ 0 if flat else s.depth - 1 }}">
   <div class="row">
     <span class="name">
       {% if s.children and not flat %}
       <button class="toggle" aria-label="Expand {{ s.name }}" aria-expanded="false"
-              hx-get="/coverage/tree?parent={{ s.path | urlencode }}&days={{ days }}"
-              hx-target="next .kids" hx-trigger="click once" onclick="toggleNode(this)">▸</button>
+              onclick="toggleNode(this)">▸</button>
       {% else %}<span class="toggle-spacer"></span>{% endif %}
       <a href="#" class="node-link" hx-get="/coverage/node?path={{ s.path | urlencode }}&days={{ days }}"
-         hx-target="#detail" onclick="selectRow(this)" title="{{ s.path }}">{{ s.name }}</a>
+         hx-target="#detail" title="{{ s.path }}">{{ s.name }}</a>
       {% if flat %}<span class="muted small path">{{ s.path }}</span>{% endif %}
+      {% if s.kind in ('zone', 'district', 'aggregate') %}<span class="badge kind" title="crosswalk kind">{{ s.kind }}</span>{% endif %}
       {% if s.alias_of %}<span class="badge badge-alias" title="Same listing as {{ s.alias_of }}">alias</span>
       {% elif s.twins %}<span class="badge badge-alias" title="Also listed as {{ s.twins | join(', ') }}">has alias</span>{% endif %}
     </span>

@@ -18,6 +18,26 @@ legacy_runs:
     outcome: resume
     note: stale ?o=92 left in run_config.yaml; re-read pages 92-95 only
 
+# Location nodes the name-based crosswalk (olx_panel/core/geo.py) can't
+# resolve: renamed municipalities, spellings OLX kept, districts. Each maps a
+# node path to its kind and IBGE municipality code
+# (`uv run python -m olx_panel crosswalk-report` lists what's left).
+crosswalk:
+  estado-rj/serra-angra-dos-reis-e-regiao/parati: {kind: city, ibge: "3303807"}             # Paraty
+  estado-sp/sao-paulo-e-regiao/embu: {kind: city, ibge: "3515004"}                          # Embu das Artes
+  estado-rj/norte-do-estado-do-rio/trajano-de-morais: {kind: city, ibge: "3305901"}         # Trajano de Moraes
+  estado-mg/regiao-de-juiz-de-fora/barbacena-e-sao-joao-del-rei/sao-joao-del-rey: {kind: city, ibge: "3162500"}  # São João del Rei
+  estado-sp/regiao-de-presidente-prudente/florinia: {kind: city, ibge: "3516101"}           # Florínea
+  estado-go/grande-goiania-e-anapolis/outras-cidades/planaltina-de-goias: {kind: city, ibge: "5217609"}  # Planaltina (GO)
+  estado-sp/sao-paulo-e-regiao/alphaville: {kind: district, ibge: "3505708"}                # Barueri
+  estado-sp/sao-paulo-e-regiao/tambore: {kind: district, ibge: "3505708"}                   # Barueri
+
+# Ads whose locationDetails.municipality is a district, not a municipality
+# ("UF/Name": IBGE code of the municipality it belongs to). "District
+# (Municipality)" forms resolve on their own.
+ad_municipalities:
+  ES/Matilde: "3200300"   # district of Alfredo Chaves
+
 # Off-tree regions (start URLs OLX accepted but its sitemap doesn't list)
 # count under their nearest existing ancestor; name another node here to
 # override. Example:

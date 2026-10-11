@@ -27,6 +27,14 @@
   {{ status.unattached | length }} unattached run(s)
 </span>
 {% endif %}
+{% if status.geo_missing %}
+<span class="pill pill-warn" title="Run: uv run python scripts/build_geo.py">no map assets</span>
+{% endif %}
+{% if status.unmatched_places or status.unknown_nodes %}
+<span class="pill pill-warn" title="Run: uv run python -m olx_panel crosswalk-report — then fix in olx_panel/overrides.yaml">
+  crosswalk gaps: {{ status.unknown_nodes | length }} node(s), {{ status.unmatched_places | length }} ad place(s)
+</span>
+{% endif %}
 {% if status.refresh_error %}
 <span class="pill pill-bad" title="{{ status.refresh_error }}">refresh failed</span>
 {% endif %}
