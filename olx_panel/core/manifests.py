@@ -239,8 +239,11 @@ def classify(run, page_cap):
         return UNKNOWN
     if (run.start_page or 1) > 1:
         return RESUME
+    # OLX's listingUrl carries the query too (/…/vila-velha?sf=1): compare
+    # paths only — the scope is the path; sort and paging are the query.
     if run.listing_url and run.start_url and \
-            urlparse(run.start_url).path.strip('/') != run.listing_url.strip('/'):
+            urlparse(run.start_url).path.strip('/') != \
+            urlparse(run.listing_url).path.strip('/'):
         return SCOPE_MISMATCH
     reason = reasons[-1]
     if reason == 'exhausted':

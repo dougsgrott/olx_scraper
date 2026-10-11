@@ -73,7 +73,8 @@ class FakeSite:
             'totalOfAds': self.total,
             'pageSize': self.page_size,
             'pageIndex': requested if self.index_lies else served,
-            'listingUrl': parsed.path,
+            # like real OLX: the path plus the query it was asked for
+            'listingUrl': parsed.path + (f'?{parsed.query}' if parsed.query else ''),
             'locations': BREADCRUMB,
             'filters': {'sort': 'date', 'pageIndex': served},
         }

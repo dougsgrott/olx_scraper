@@ -43,7 +43,7 @@ def test_exhausted_scope_writes_a_v2_manifest(workdir, fast_catalog, monkeypatch
     assert (m['scope'], m['start_page']) == ('imoveis/aluguel', 1)
     assert m['invocation_id'] == 'job-1'
     assert m['early_stop'] == {'patience': 0, 'min_new_per_page': 1, 'max_pages': 0}
-    assert (m['total_of_ads'], m['listing_url'], m['sort']) == (120, ES, 'date')
+    assert (m['total_of_ads'], m['listing_url'], m['sort']) == (120, ES + '?sf=1', 'date')
     assert m['breadcrumb'][2] == {
         'level': 'region', 'value': '27', 'label': 'DDD 27 - Norte do Espírito Santo',
         'url': '/imoveis/aluguel/estado-es/norte-do-espirito-santo'}

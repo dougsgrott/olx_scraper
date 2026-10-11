@@ -230,6 +230,21 @@ def scrape_catalog(start_urls, early_stop=None):
     return manifests
 
 
+_scope_keys_noted = False
+
+
+def _note_missing_scope_keys(props):
+    """Manifest v2 copies OLX's location breadcrumb and sort from the page
+    data. If OLX moved them, say so once per run, listing what the ads
+    object does carry, so the parser can follow."""
+    global _scope_keys_noted
+    missing = [k for k in ('locations', 'filters') if k not in props]
+    if missing and not _scope_keys_noted:
+        _scope_keys_noted = True
+        print(f"Note: page data has no {', '.join(missing)} (manifest breadcrumb/sort "
+              f"stay empty). Keys present: {', '.join(sorted(props))}")
+
+
 def _normalize_early_stop(early_stop):
     """Clamp config to non-negative ints; 0 disables the corresponding rule.
     patience=0 (or a missing block) disables the stale-page rule; max_pages=0
@@ -286,7 +301,9 @@ def _scrape_from(session, start_url, factory, exporter, stop_cfg):
             print(f"Page cap: page {page_no} repeats the previous page; OLX "
                   f"serves no further pages of {start_url}.")
             return 'page_cap'
-        exporter.record_scope(props)
+        if pages_done == 0:
+            exporter.record_scope(props)
+            _note_missing_scope_keys(props)
 
         new = dup = 0
         for ad in ads:
