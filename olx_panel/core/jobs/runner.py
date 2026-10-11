@@ -302,6 +302,21 @@ class Supervisor(threading.Thread):
         self.jobs.update(job.id, **fields)
         self.jobs.event(job.id, state, reason)
 
+    def reconcile(self, job):
+        """Re-derive succeeded/partial of a finished scrape from its
+        manifests, which may since be classified differently (a rule fix,
+        an overrides.yaml entry). Returns the up-to-date job."""
+        if job.kind != kinds.SCRAPE or job.state not in (SUCCEEDED, PARTIAL) \
+                or job.exit_code != 0:
+            return job
+        state, reason = self._success_state(job)
+        if (state, reason) != (job.state, job.state_reason):
+            with self._lock:
+                self.jobs.update(job.id, state=state, state_reason=reason)
+                self.jobs.event(job.id, 'reclassified', f'{job.state} -> {state}')
+            job = self.jobs.get(job.id)
+        return job
+
     def _success_state(self, job):
         if job.kind != kinds.SCRAPE:
             return SUCCEEDED, None

@@ -43,7 +43,7 @@ def test_exhausted_scope_writes_a_v2_manifest(workdir, fast_catalog, monkeypatch
     assert (m['scope'], m['start_page']) == ('imoveis/aluguel', 1)
     assert m['invocation_id'] == 'job-1'
     assert m['early_stop'] == {'patience': 0, 'min_new_per_page': 1, 'max_pages': 0}
-    assert (m['total_of_ads'], m['listing_url'], m['sort']) == (120, ES, 'date')
+    assert (m['total_of_ads'], m['listing_url'], m['sort']) == (120, ES + '?sf=1', 'date')
     assert m['breadcrumb'][2] == {
         'level': 'region', 'value': '27', 'label': 'DDD 27 - Norte do Espírito Santo',
         'url': '/imoveis/aluguel/estado-es/norte-do-espirito-santo'}
@@ -153,3 +153,24 @@ def test_second_stop_request_interrupts_at_once_but_keeps_the_manifest(
     [m] = manifests_on_disk(workdir)
     assert (m['stop_reason'], m['pages_scraped'], m['new_items']) == (['cancelled'], 1, 50)
     assert not [f for f in all_files(workdir) if f.endswith('.tmp')]
+
+
+def test_october_page_data_and_a_note_for_what_is_missing(workdir, fast_catalog,
+                                                          monkeypatch, capsys):
+    site = FakeSite(total=120, page_data='2026-10')
+    [m] = scrape(fast_catalog, monkeypatch, site, [url(ES)])
+    assert m['breadcrumb'][2]['label'] == 'DDD 27 - Norte do Espírito Santo'
+    assert m['breadcrumb'][2]['url'].endswith('/estado-es/norte-do-espirito-santo')
+    assert m['breadcrumb_raw'] is None
+    assert m['location_text'] == 'Vitória, ES'
+    assert m['sort'] is None
+    out = capsys.readouterr().out
+    assert out.count('Note: page data') == 1           # once per run, not per page
+    assert 'no sort in `filters` (keys: pageIndex, state)' in out
+
+
+def test_unreadable_breadcrumb_is_kept_raw_in_the_manifest(workdir, fast_catalog,
+                                                           monkeypatch, capsys):
+    [m] = scrape(fast_catalog, monkeypatch, FakeSite(total=10, page_data='opaque'), [url(ES)])
+    assert m['breadcrumb'] == [] and m['breadcrumb_raw'] == '["Brasil", "ES", "DDD 27"]'
+    assert 'sample: ["Brasil", "ES", "DDD 27"]' in capsys.readouterr().out

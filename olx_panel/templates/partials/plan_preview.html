@@ -13,6 +13,13 @@
 
   <p class="totals"><b>{{ preview.items | length }}</b> URL(s) · ~{{ preview.pages | num }} pages ·
     ~{{ preview.seconds | duration }} <span class="muted small">at {{ '%.1f' | format(preview.seconds_per_page) }} s/page</span></p>
+  {% set unwalked = preview.never_walked %}
+  {% if unwalked and not o.full_pass %}
+  <p class="note small">{{ unwalked | length }} of these scope(s) were never walked to their last page, so their
+    <b>baseline</b> stays incomplete — early stop halts once the newest ads are known, and older ads never collected
+    may sit deeper. Tick <b>Full pass</b> to walk them to the end once (~{{ preview.never_walked_pages | num }} pages,
+    ~{{ (preview.never_walked_pages * preview.seconds_per_page) | duration }}); afterwards early stop keeps them fresh.</p>
+  {% endif %}
   {% if browser %}<p class="pill pill-busy">browser busy ({{ browser.label }}): the job will wait for it</p>{% endif %}
   {% for w in preview.warnings %}<p class="pill pill-warn">{{ w }}</p>{% endfor %}
 
@@ -28,7 +35,7 @@
 {% if preview.items %}
 <div class="scroll">
 <table class="runs compact">
-  <thead><tr><th>Scope</th><th>Kind</th><th class="num">OLX ads</th><th class="num">~Pages</th><th>Last run</th></tr></thead>
+  <thead><tr><th>Scope</th><th>Kind</th><th class="num">OLX ads</th><th class="num">~Pages</th><th>Last run</th><th title="Last walk to the last page (here, an alias twin or above)">Walked to end</th></tr></thead>
   <tbody>
   {% for i in preview.items %}
     <tr title="{{ i.url }}">
@@ -37,6 +44,9 @@
       <td class="num">{{ i.count | num }}</td>
       <td class="num">{{ i.est_pages }}</td>
       <td>{% if i.last_run %}<span class="dot oc-{{ i.last_run.outcome }}" title="{{ i.last_run.outcome }}"></span>{{ i.last_run.started_at | day }}{% else %}<span class="muted">never</span>{% endif %}</td>
+      <td>{% if i.complete_at %}<span class="bl-complete">{{ i.complete_at | day }}</span>
+        {% elif i.kind == 'leaf' %}<span class="bl-partial">never</span>
+        {% else %}<span class="muted" title="more ads than OLX serves for one URL: the page cap ends every walk">page cap</span>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>

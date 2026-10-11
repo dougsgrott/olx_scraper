@@ -140,7 +140,11 @@ Since manifest schema v2 each one also carries `schema_version`, the exact
 `scope` (e.g. `imoveis/aluguel`), `invocation_id` (shared by all URLs of one
 run; `OLX_INVOCATION_ID` if set), `started_at`/`finished_at` with UTC offset,
 the applied `early_stop`, OLX's own `total_of_ads` / `listing_url` / `sort` /
-location `breadcrumb` from the first page, and `new_per_page`.
+location `breadcrumb` / `location_text` from the first page, and
+`new_per_page`. OLX renames page-data fields now and then (`locations` became
+`breadcrumbs` in 2026-10), so the breadcrumb is read by several key names;
+when none fits, the manifest keeps a raw sample in `breadcrumb_raw` and the
+run prints one `Note: page data — …` line saying what is missing.
 
 `new_items` are appended to `scraped_data/olx.sqlite` (table `catalog_data`)
 and written to `runs/spider=catalog/dt=<dt>/region=<slug>/<run_id>.jsonl.gz`
@@ -300,7 +304,9 @@ uv run python -m olx_panel crosswalk-report   # OLX nodes / ad places the IBGE m
   "Select stale" (scraped before, not fresh within N days) or "Import
   run_config", then **Preview plan**: the URLs (`plan.build_plan`: leaves,
   dense scopes, remainders after their children, alias twins once),
-  estimated pages and time, early-stop options or a full pass. **Enqueue**
+  estimated pages and time, early-stop options or a full pass (the preview
+  flags scopes never walked to their last page, whose baseline only a full
+  pass can complete). **Enqueue**
   it, download it as a `run_config` fragment, or copy the URLs. A node's
   details also offer **Probe counts** (the density prober on its subtree).
 - **Jobs** — the panel's queue: one browser job at a time (scrape, warm,

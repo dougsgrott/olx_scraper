@@ -49,6 +49,7 @@ def _log_text(job, limit=LOG_TAIL_BYTES):
 def _view(request, job):
     """A job plus what its log and manifests say about it."""
     sup = supervisor(request)
+    job = sup.reconcile(job)
     model = service(request).model()
     progress = parse(_log_text(job)) if job.kind in (kinds.SCRAPE, kinds.PROBE) else None
     outcomes = sup.url_outcomes(job) if job.kind == kinds.SCRAPE else []

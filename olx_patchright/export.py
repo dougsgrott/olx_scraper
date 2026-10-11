@@ -35,6 +35,67 @@ _NON_GEO_SEGMENTS = frozenset({
 # settings and OLX's page-1 metadata; v1 fields are unchanged.
 MANIFEST_SCHEMA_VERSION = 2
 
+# OLX renames page-data fields now and then: the location breadcrumb was
+# `locations` (2026-07: level/value/label/url per entry) and is `breadcrumbs`
+# by 2026-10 (entry shape unverified), so entries are read by any of these
+# keys and the raw value is kept whenever that still yields nothing usable.
+_CRUMB_KEYS = {
+    'level': ('level', 'type', 'kind'),
+    'value': ('value', 'id'),
+    'label': ('label', 'name', 'text', 'title'),
+    'url': ('url', 'href', 'link', 'path', 'pathname'),
+}
+_SORT_KEYS = ('sort', 'sf', 'order', 'orderBy')
+RAW_SAMPLE_CHARS = 2000
+
+
+def _first(entry, keys):
+    for key in keys:
+        value = entry.get(key)
+        if value not in (None, ''):
+            return value
+    return None
+
+
+def _crumb_list(props):
+    for key in ('locations', 'breadcrumbs'):
+        value = props.get(key)
+        if isinstance(value, dict):  # e.g. {"items": [...]}
+            value = next((v for v in value.values() if isinstance(v, list)), None)
+        if isinstance(value, list) and value:
+            return key, value
+    return None, None
+
+
+def parse_breadcrumb(props):
+    """(entries, raw, notes): entries normalised to level/value/label/url;
+    `raw` is a JSON sample of the source field when the entries lack labels
+    or URLs (so the next manifest shows its real shape); notes say what is
+    missing, for the run's log."""
+    notes = []
+    source, crumbs = _crumb_list(props)
+    if crumbs is None:
+        notes.append('no location breadcrumb (neither `locations` nor `breadcrumbs`)')
+        return [], None, notes
+    entries = [{field: _first(c, keys) for field, keys in _CRUMB_KEYS.items()}
+               for c in crumbs if isinstance(c, dict)]
+    raw = None
+    if not any(e['label'] and e['url'] for e in entries):
+        raw = json.dumps(crumbs, ensure_ascii=False, default=str)[:RAW_SAMPLE_CHARS]
+        notes.append(f'`{source}` entries have no recognisable label/url; '
+                     f'sample: {raw[:400]}')
+    return entries, raw, notes
+
+
+def parse_sort(props):
+    filters = props.get('filters')
+    if not isinstance(filters, dict):
+        return None, ['no `filters` object']
+    sort = _first(filters, _SORT_KEYS)
+    if sort is None:
+        return None, [f'no sort in `filters` (keys: {", ".join(sorted(filters))})']
+    return sort, []
+
 
 def infer_region(url):
     path = urlparse(url).path.strip('/')
@@ -123,21 +184,25 @@ class EncounterExporter:
     def record_scope(self, props):
         """Keep OLX's own description of the scope from the first page: its
         live ad count, the listing it actually served (an unknown scope is
-        served as a broader search at the same URL), the sort, and the
-        location breadcrumb (display names, each with the scope URL it names;
-        the `region` level's value is the DDD number)."""
+        served as a broader search at the same URL), the sort, the location
+        breadcrumb (display names, each with the scope URL it names; the DDD
+        is in the macro-region entry) and OLX's location text. Returns notes
+        on whatever OLX's page data no longer carries."""
         if self._scope_meta:
-            return
-        filters = props.get('filters') or {}
+            return []
+        breadcrumb, raw, notes = parse_breadcrumb(props)
+        sort, sort_notes = parse_sort(props)
+        location_text = props.get('adLocation')
         self._scope_meta = {
             'total_of_ads': props.get('totalOfAds'),
             'listing_url': props.get('listingUrl'),
-            'sort': filters.get('sort') if isinstance(filters, dict) else None,
-            'breadcrumb': [
-                {k: loc.get(k) for k in ('level', 'value', 'label', 'url')}
-                for loc in props.get('locations') or [] if isinstance(loc, dict)
-            ],
+            'sort': sort,
+            'breadcrumb': breadcrumb,
+            'breadcrumb_raw': raw,
+            'location_text': location_text.strip(' -') if isinstance(location_text, str)
+            else None,
         }
+        return notes + sort_notes
 
     def count_page(self, new_items):
         """One catalogue page fully processed, yielding `new_items` new uids."""
@@ -186,6 +251,8 @@ class EncounterExporter:
             'listing_url': self._scope_meta.get('listing_url'),
             'sort': self._scope_meta.get('sort'),
             'breadcrumb': self._scope_meta.get('breadcrumb'),
+            'breadcrumb_raw': self._scope_meta.get('breadcrumb_raw'),
+            'location_text': self._scope_meta.get('location_text'),
             'new_per_page': self._new_per_page,
         }
         tmp_path = self._manifest_path + '.tmp'

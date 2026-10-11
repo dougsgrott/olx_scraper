@@ -50,7 +50,8 @@ class FakeSite:
     only their repeated content to give them away."""
 
     def __init__(self, total, page_cap=100, page_size=50, uid_base=1000000,
-                 on_goto=None, index_lies=False, payload=True, delay_s=0, status=200):
+                 on_goto=None, index_lies=False, payload=True, delay_s=0, status=200,
+                 page_data='2026-07'):
         self.total = total
         self.page_cap = page_cap
         self.page_size = page_size
@@ -60,6 +61,7 @@ class FakeSite:
         self.payload = payload
         self.delay_s = delay_s
         self.status = status
+        self.page_data = page_data  # '2026-07' | '2026-10' | 'opaque' (see props_for)
         self.requests = []
 
     def props_for(self, url):
@@ -68,15 +70,25 @@ class FakeSite:
         served = min(requested, self.page_cap)
         first = (served - 1) * self.page_size
         count = max(0, min(self.page_size, self.total - first))
-        return {
+        props = {
             'ads': [make_ad(self.uid_base + first + i) for i in range(count)],
             'totalOfAds': self.total,
             'pageSize': self.page_size,
             'pageIndex': requested if self.index_lies else served,
-            'listingUrl': parsed.path,
-            'locations': BREADCRUMB,
-            'filters': {'sort': 'date', 'pageIndex': served},
+            # like real OLX: the path plus the query it was asked for
+            'listingUrl': parsed.path + (f'?{parsed.query}' if parsed.query else ''),
         }
+        if self.page_data == '2026-07':   # the layout seen in July
+            props['locations'] = BREADCRUMB
+            props['filters'] = {'sort': 'date', 'pageIndex': served}
+        elif self.page_data == '2026-10':  # renamed fields, as of October
+            props['breadcrumbs'] = [{'name': c['label'], 'href': 'https://www.olx.com.br' + c['url']}
+                                    for c in BREADCRUMB]
+            props['adLocation'] = '- Vitória, ES'
+            props['filters'] = {'pageIndex': served, 'state': '14'}
+        else:                              # a shape the parser can't read
+            props['breadcrumbs'] = ['Brasil', 'ES', 'DDD 27']
+        return props
 
 
 class FakeSites:

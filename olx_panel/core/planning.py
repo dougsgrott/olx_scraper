@@ -44,7 +44,12 @@ class PlanItem:
     est_pages: int
     last_run: object
     eff_at: object
+    complete_at: object = None  # last walk to the end (here, a twin or above)
     queued: bool = False
+
+    @property
+    def full_pass_pages(self):
+        return math.ceil(min(self.count, PAGE_CAP * PAGE_SIZE) / PAGE_SIZE)
 
 
 @dataclass
@@ -62,6 +67,18 @@ class Preview:
     @property
     def seconds(self):
         return self.pages * self.seconds_per_page
+
+    @property
+    def never_walked(self):
+        """Leaves never walked to their last page. Early stop alone can't
+        complete them: after global dedup it stops once the newest ads are
+        known, while older never-collected ones may sit deeper. Dense scopes
+        and remainders are left out — the page cap stops them first."""
+        return [i for i in self.items if i.kind == 'leaf' and i.complete_at is None]
+
+    @property
+    def never_walked_pages(self):
+        return sum(i.full_pass_pages for i in self.never_walked)
 
 
 def options_from_run_config(summary):
@@ -112,7 +129,8 @@ def preview(model, paths, options, scope, queued_paths=()):
         result.items.append(PlanItem(
             path=path, name=stats.name, count=count, kind=kind,
             url=start_url(path, scope), est_pages=_estimate(stats, count, kind, options),
-            last_run=stats.last_run, eff_at=stats.eff_at, queued=path in queued))
+            last_run=stats.last_run, eff_at=stats.eff_at,
+            complete_at=stats.complete_at, queued=path in queued))
     dense = [i for i in result.items if i.kind == 'dense']
     if dense:
         result.warnings.append(f'{len(dense)} dense scope(s) hold more ads than OLX '

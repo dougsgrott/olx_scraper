@@ -181,6 +181,8 @@ def scrape_catalog(start_urls, early_stop=None):
     fails is recorded and skipped, so one bad page cannot end the run; a stop
     request (SIGINT/SIGTERM) ends the run after the current page.
     Returns the list of manifests, in start_urls order."""
+    global _scope_keys_noted
+    _scope_keys_noted = False
     factory = session_factory()
     stop_cfg = _normalize_early_stop(early_stop)
     invocation_id = os.environ.get('OLX_INVOCATION_ID') or \
@@ -228,6 +230,20 @@ def scrape_catalog(start_urls, early_stop=None):
             signal.signal(sig, handler)
 
     return manifests
+
+
+_scope_keys_noted = False
+
+
+def _note_scope_data(notes, props):
+    """Manifest v2 copies OLX's location breadcrumb and sort from the page
+    data. If OLX moved or reshaped them, say so once per run (with what the
+    page data does carry) so the parser in export.py can follow."""
+    global _scope_keys_noted
+    if notes and not _scope_keys_noted:
+        _scope_keys_noted = True
+        print(f"Note: page data — {'; '.join(notes)}. "
+              f"Keys present: {', '.join(sorted(props))}")
 
 
 def _normalize_early_stop(early_stop):
@@ -286,7 +302,8 @@ def _scrape_from(session, start_url, factory, exporter, stop_cfg):
             print(f"Page cap: page {page_no} repeats the previous page; OLX "
                   f"serves no further pages of {start_url}.")
             return 'page_cap'
-        exporter.record_scope(props)
+        if pages_done == 0:
+            _note_scope_data(exporter.record_scope(props), props)
 
         new = dup = 0
         for ad in ads:

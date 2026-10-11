@@ -8,6 +8,7 @@ catalog_data rows, and a glob for stranded partial bronze files.
 import glob
 import logging
 import os
+import re
 import threading
 from datetime import datetime
 
@@ -144,16 +145,27 @@ class PanelService:
         }
 
 
+_DDD_LABEL = re.compile(r'\bDDD\s*(\d{2})\b')
+
+
 def _breadcrumb_ddds(runs):
-    """OLX's own word on each macro's DDD: the `region` level of a v2
-    manifest's breadcrumb carries the DDD number as its value."""
+    """OLX's own word on each macro's DDD, from v2 manifest breadcrumbs: the
+    macro-region entry (its URL names a depth-2 path) carries the DDD as its
+    value (`level: region`, 2026-07 format) and in its label ("DDD 27 -
+    Norte do Espírito Santo"), which survives field renames."""
     ddds = {}
     for run in sorted(runs, key=lambda r: r.started_at):
         for crumb in run.breadcrumb or []:
-            if crumb.get('level') == 'region' and crumb.get('url') and crumb.get('value'):
-                region = infer_region(crumb['url'])
-                if region != 'unknown':
-                    ddds[path_of(region)] = str(crumb['value'])
+            region = infer_region(crumb['url']) if crumb.get('url') else 'unknown'
+            if region == 'unknown' or region.count('_') != 1:
+                continue
+            value = str(crumb.get('value') or '')
+            if crumb.get('level') == 'region' and value.isdigit() and len(value) == 2:
+                ddds[path_of(region)] = value
+                continue
+            m = _DDD_LABEL.search(crumb.get('label') or '')
+            if m:
+                ddds[path_of(region)] = m.group(1)
     return ddds
 
 

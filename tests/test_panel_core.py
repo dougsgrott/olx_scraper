@@ -209,3 +209,55 @@ def test_title_from_slug():
     assert title_from_slug('alto-de-pinheiros') == 'Alto de Pinheiros'
     assert title_from_slug('sao-paulo-e-regiao') == 'Sao Paulo e Regiao'
     assert title_from_slug('e-regiao') == 'E Regiao'
+
+
+@pytest.mark.parametrize('listing_url, outcome', [
+    ('/imoveis/aluguel/estado-es/norte-do-espirito-santo/vila-velha?sf=1', 'caught_up'),
+    ('/imoveis/aluguel/estado-es/norte-do-espirito-santo/vila-velha', 'caught_up'),
+    ('/imoveis/aluguel/estado-es?sf=1', 'scope_mismatch'),
+])
+def test_scope_check_compares_paths_not_queries(listing_url, outcome):
+    """Real OLX echoes the query in listingUrl (found in a real run, where
+    every URL came out scope_mismatch)."""
+    run = mf.Run(region='r', run_id='x', dt=None, started_at=NOW, finished_at=NOW,
+                 duration_s=1, pages_scraped=13, total_seen=0, new_items=0,
+                 duplicate_items=0, stop_reason=['early_stop'], schema_version=2,
+                 start_url='https://www.olx.com.br/imoveis/aluguel/estado-es/'
+                           'norte-do-espirito-santo/vila-velha?sf=1',
+                 scope='imoveis/aluguel', start_page=1, invocation_id='j1',
+                 early_stop=None, total_of_ads=1517, listing_url=listing_url, sort=None,
+                 breadcrumb=[], new_per_page=None, store='outbox', file_path='',
+                 file_missing=False)
+    assert mf.classify(run, page_cap=100) == outcome
+
+
+def test_breadcrumb_ddds_from_value_or_label():
+    from olx_panel.core.service import _breadcrumb_ddds
+    july = mf.Run(region='r', run_id='1', dt=None, started_at=NOW, finished_at=NOW,
+                  duration_s=1, pages_scraped=1, total_seen=0, new_items=0,
+                  duplicate_items=0, stop_reason=['exhausted'], schema_version=2,
+                  start_url=None, scope=None, start_page=1, invocation_id=None,
+                  early_stop=None, total_of_ads=None, listing_url=None, sort=None,
+                  breadcrumb=[{'level': 'region', 'value': '27', 'label': 'x',
+                               'url': '/imoveis/aluguel/estado-es/norte-do-espirito-santo'}],
+                  new_per_page=None, store='outbox', file_path='', file_missing=False)
+    october = mf.Run(**{**july.__dict__, 'run_id': '2', 'started_at': NOW + timedelta(seconds=1),
+                        'breadcrumb': [
+                            {'level': None, 'value': None, 'label': 'Espírito Santo',
+                             'url': 'https://www.olx.com.br/imoveis/aluguel/estado-es'},
+                            {'level': None, 'value': None, 'label': 'DDD 28 - Sul do Espírito Santo',
+                             'url': 'https://www.olx.com.br/imoveis/aluguel/estado-es/sul-do-espirito-santo'},
+                        ]})
+    assert _breadcrumb_ddds([july, october]) == {
+        'estado-es/norte-do-espirito-santo': '27', 'estado-es/sul-do-espirito-santo': '28'}
+
+
+def test_preview_flags_leaves_never_walked_to_the_end(env):
+    from olx_panel.core import planning
+    model = env[0].model()
+    preview = planning.preview(model, ['estado-xx'], planning.Options(), 'imoveis/aluguel')
+    flagged = [i.path for i in preview.never_walked]
+    # centro was never walked whole; macro-b had an exhausted run; zona-sul's
+    # aclimacao twin inherits centro/aclimacao's complete pass; moema is dense
+    assert flagged == ['estado-xx/macro-a/centro']
+    assert preview.never_walked_pages == 24
